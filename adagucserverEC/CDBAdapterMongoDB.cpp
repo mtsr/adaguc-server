@@ -26,21 +26,51 @@
 #include "mongo/client/dbclient.h"
 #include "mongo/bson/bson.h"
 #include <boost/algorithm/string.hpp>
+#include <boost/property_tree/ptree.hpp>
+#include <boost/property_tree/xml_parser.hpp>
 #include "CDBAdapterMongoDB.h"
 #include <set>
 #include "CDebugger.h"
+#include "CGetFileInfo.h"
+#include <fstream>
+#include <limits>
+#include <string>
+#include <sstream>
+#include <algorithm>
 
+/* ---- CONSTANTS AND GLOBAL VARIABLES ---- */
+/* ---------------------------------------- */
 const char *CDBAdapterMongoDB::className="CDBAdapterMongoDB";
 
 //#define CDBAdapterMongoDB_DEBUG
 
+/* The configuration XML file. */
 CServerConfig::XMLE_Configuration *configurationObject;
 
+/* Is the dataset config written or not? Only needed once! */
+bool configWritten = false;
+
 /* Used to discover the sorting of the MongoDB queries. */
-std::map<std::string,std::string> table_combi;
+std::map<std::string,std::string> tableCombi;
 
 /* To remember the current used dimension, define a global variable. */
-const char* current_used_dimension;
+const char* currentUsedDimension = "";
+
+/* The current used dataset name and version. */
+const char* dataSetName = "-";
+const char* dataSetVersion = "-";
+
+/* Constants for defining the tables for the granules
+ * and datasets in MongoDB. */
+const char* dataSetsTableMongoDB = "database.dataSets";
+const char* dataGranulesTableMongoDB = "database.datagranules";
+
+/* Current used layer. */
+CServerConfig::XMLE_Layer * cfgLayer;
+
+/* */
+CT::string conditionalSecondDimension = "";
+/* ---------------------------------------- */
 
 DEF_ERRORMAIN();
 
@@ -54,129 +84,253 @@ DEF_ERRORMAIN();
  */
 mongo::DBClientConnection *dataBaseConnection;
 
-mongo::DBClientConnection *getDataBaseConnection(){
-  if(dataBaseConnection == NULL) {
-    std::string errorMessage;
-    /* Connecting to the database. Only needed is host + port. */
-    dataBaseConnection = new mongo::DBClientConnection();
-    dataBaseConnection->connect(configurationObject->DataBase[0]->attr.parameters.c_str(),errorMessage);
+mongo::DBClientConnection *getDataBaseConnection() {
     
-    /* Authenticating with dbname, username and password. */
-    /*
-    dataBaseConnection->auth(configurationObject->DataBase[0]->attr.parameters.c_str(),
-      configurationObject->DataBase[1]->attr.parameters.c_str(),
-      configurationObject->DataBase[2]->attr.parameters.c_str(),errorMessage); */
-    if(!errorMessage.empty()){
-      /* Something with className error. Commented for now. TODO */
-      CDBError("Unable to connect to the MongoDB database: %s",errorMessage.c_str());
-      return NULL;
+    #ifdef MEASURETIME
+        StopWatch_Stop(">CDBAdapterMongoDB::getDatabaseConnection");
+    #endif
+    
+    if(dataBaseConnection == NULL) {
+        // Variable for holding the error message.
+        std::string errorMessage;
+    
+        // Getting the parameters for connecting to the MongoDB database,
+        // like host, port and username.
+        CT::string parameters = configurationObject->DataBase[0]->attr.parameters.c_str();
+        CT::string *splittedParameters = parameters.splitToArray(" ");
+    
+        /* Connecting. */
+        dataBaseConnection = new mongo::DBClientConnection();
+        dataBaseConnection->connect(splittedParameters[0].c_str(),errorMessage);
+
+        /* Authenticating. */
+        dataBaseConnection->auth("database", splittedParameters[1].c_str(), splittedParameters[2].c_str(),errorMessage); 
+
+        if(!errorMessage.empty()){
+            CDBError("Unable to connect to DB: %s",errorMessage.c_str());
+            return NULL;
+        }
     }
-  }
-  return dataBaseConnection;
-}
+  
 
-int checkTableMongo(const char * pszTableName,const char *pszColumns){
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug("[Function: checkTableMongo]");
-  #endif
-  // returncodes:
-  // 0 = no change
-  // 1 = error
-  // 2 = table created
-  
-  mongo::DBClientConnection * DB = getDataBaseConnection();
-  if(DB == NULL) {
-    CDBError("checkTable: Not connected to DB");
-    return 1;
-  }
-  /* Collection name needs <database-name>. in front of it. */
-  std::string collection_in_mongo = "database.datagranules";
-  
-  /* Getting the record of the given granule. */
-  mongo::BSONObjBuilder selecting_query;
-  selecting_query << "fileName" << pszTableName;
-  mongo::BSONObj the_query = selecting_query.obj();
-  
-  mongo::BSONObjBuilder specific_fields;
-  specific_fields << "adaguc" << 1 << "_id" << 0;
-  mongo::BSONObj fields_specifically = specific_fields.obj();
-  
-  /* Getting the result. */
-  std::auto_ptr<mongo::DBClientCursor> ptr_to_mongodb = DB->query(collection_in_mongo, mongo::Query(the_query), 0, 0, &fields_specifically);
-  
-  /* Getting the BSON object of the record. */
-  mongo::BSONObj record = ptr_to_mongodb->next().getObjectField("adaguc");
-  
-  /* There must be returned exactly 1 field ( path ), otherwise they don't exist. */
-  if(record.nFields() != 1) {
+    #ifdef MEASURETIME
+        StopWatch_Stop("<CDBAdapterMongoDB::getDatabaseConnection");
+    #endif
     
-    CDBDebug("The granule with fileName %s contains no adaguc field.", pszTableName);
-    CDBError("Error: No adaguc field in granule with fileName %s.", pszTableName);
-  
-    /*
-     * If there is no adaguc field in MongoDB, create the whole package.
-     * Just with empty values, these will be added in addFilesToDataBase.
-     */
-    /* If not existing, create them! */
-    //mongo::BSONObjBuilder update_query;
-    //update_query << "$set" << BSON("adaguc" << BSON("path" << "" << "dimension" << BSON("time" << BSON("time" << "" << "dimtime" << BSON_ARRAY(0 << 1) << "filedate" << ""))));
-    //mongo::BSONObj update_query_bson = update_query.obj();
-  
-    /* Update the right granule. */
-    //DB->update("database.datagranules", mongo::Query(the_query), update_query_bson);
-  
-
-    //std::auto_ptr<mongo::DBClientCursor> ptr_for_check = DB->query(collection_in_mongo, mongo::Query(the_query), 0, 0, &fields_specifically);
-    //if(ptr_for_check->more()){
-      //if(ptr_for_check->next().getObjectField("adaguc").nFields() !=2) {
-        /* If query not succeeded. */
-  	    //return 1;
-      //} else {
-	    /* If it did succeed.. */
-        //return 2;
-      //}
-    //}
-    return 1;
-  }
-  
-  return 0;
+    return dataBaseConnection;
 }
 
+/*
+ * Writing the dataset config file to the MongoDB database. This way, no extra config file is needed.
+ * 
+ * @param     CT::string    The path to the XML.
+ * @param   CT::string    The dataset path to write.
+ * @return    int     Always returns 0.
+ */
+int CDBAdapterMongoDB::writeConfigXMLToDatabase(CT::string filePath, CT::string datasetPath) {
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop(">CDBAdapterMongoDB::writeConfigXMLToDatabase");
+    #endif
+  
+    mongo::DBClientConnection * DB = getDataBaseConnection();
+    if(DB == NULL) {
+        return -1;
+    }
+
+    /* Retrieve the dataset name and version. */
+    
+    /* Getting the number of directories of a granule. */
+    CT::string VFSPath = configurationObject->VFSPath[0]->attr.value.c_str();
+    size_t VfsDirectoriesCount = VFSPath.splitToArray("/")->count;
+  
+    /* Setting the global variables. */
+    dataSetName = datasetPath.splitToArray("/")[VfsDirectoriesCount].c_str();
+    dataSetVersion = datasetPath.splitToArray("/")[VfsDirectoriesCount + 1].c_str();
+  
+    /* Getting the complete XML config. */
+    CT::string fileInfo = CGetFileInfo::getLayersForFile(filePath.c_str());
+    fileInfo.replaceSelf("[DATASETPATH]",datasetPath.c_str());
+  
+    /* Complete query for selecting the correct dataset. */
+    mongo::BSONObjBuilder queryBuilder;
+    queryBuilder << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion;
+    mongo::BSONObj query = queryBuilder.obj();
+  
+    /* The data to be stored. */
+    mongo::BSONObjBuilder adagucConfigQueryBuilder;
+    adagucConfigQueryBuilder << "$set" << BSON("adagucConfig" << fileInfo.c_str());
+    mongo::BSONObj adagucConfigQuery = adagucConfigQueryBuilder.obj();
+  
+    /* Update. */
+    DB->update(dataSetsTableMongoDB, mongo::Query(query), adagucConfigQuery);
+  
+    #ifdef MEASURETIME
+        StopWatch_Stop("<CDBAdapterMongoDB::writeConfigXMLToDatabase");
+    #endif
+        
+    return 0;
+}
+
+/*
+ * Reading the dataset config file from the MongoDB database. 
+ * 
+ * @param     CT::string    The dataset name to search for.
+ * @param   CT::string    The dataset version to search for.
+ * @return    CT::string    The complete dataset config as XML.
+ */
+CT::string CDBAdapterMongoDB::getAdagucConfig(CT::string dataSetName, CT::string dataSetVersion) {
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop(">CDBAdapterMongoDB::getAdagucConfig");
+    #endif
+
+    mongo::DBClientConnection * DB = getDataBaseConnection();
+    if(DB == NULL) {
+        return "";
+    }
+  
+    /* Making the query. */
+    mongo::BSONObjBuilder queryBuilder;
+    queryBuilder << "dataSetName" << dataSetName.c_str() << "dataSetVersion" << dataSetVersion.c_str();
+    mongo::BSONObj query = queryBuilder.obj();
+  
+    /* Selecting which fields we want to get from the query. */
+    mongo::BSONObjBuilder selectQueryBuilder;
+    selectQueryBuilder << "adagucConfig" << 1 << "_id" << 0;
+    mongo::BSONObj selectQuery = selectQueryBuilder.obj();
+  
+    /* Executing the query. */
+    std::auto_ptr<mongo::DBClientCursor> ptrToMongoDB = DB->query(dataSetsTableMongoDB, mongo::Query(query), 0, 0, &selectQuery);
+  
+    CT::string returnValue = "";
+    if(ptrToMongoDB->more()) {
+        returnValue = ptrToMongoDB->next().getStringField("adagucConfig");
+    } else {
+        CDBError("No adagucConfig field available for dataset %s with version %s", dataSetName.c_str(), dataSetVersion.c_str()); 
+    }
+  
+    return returnValue;
+}
+
+/*
+ * If the granule WITH adaguc field already in the database?
+ * 
+ * @param     const char*   The filename of the granule.
+ * @param     const char*   Not used.
+ * @return    int     0 for no changes, 1 for error.
+ */
+int checkTableMongo(const char * pszTableName,const char *pszColumns) {
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop(">CDBAdapterMongoDB::checkTableMongo");
+    #endif
+  
+    mongo::DBClientConnection * DB = getDataBaseConnection();
+    if(DB == NULL) {
+        return 1;
+    }
+    
+    /* Making the query. */
+    mongo::BSONObjBuilder queryBuilder;
+    queryBuilder << "fileName" << pszTableName << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion;
+    mongo::BSONObj query = queryBuilder.obj();
+  
+    /* Selecting which fields we want to get from the query. */
+    mongo::BSONObjBuilder selectQueryBuilder;
+    selectQueryBuilder << "adaguc" << 1 << "_id" << 0;
+    mongo::BSONObj selectQuery = selectQueryBuilder.obj();
+  
+    /* Executing the query. */
+    std::auto_ptr<mongo::DBClientCursor> ptr_to_mongodb = DB->query(dataGranulesTableMongoDB, mongo::Query(query), 0, 0, &selectQuery);
+  
+    /* The only thing we need is the 'adaguc' field of the MongoDB record. */
+    mongo::BSONObj record = ptr_to_mongodb->next().getObjectField("adaguc");
+  
+    /* There must be returned exactly 1 field ( path ), otherwise they don't exist. */
+    if(record.nFields() == 0) {
+        
+        CDBError("Error: No adaguc field in granule with fileName %s.", pszTableName);
+        
+        /* Return 2 for bad. */
+        return 2;
+    }
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop("<CDBAdapterMongoDB::checkTableMongo");
+    #endif
+  
+    /* Return 0 for success. */
+    return 0;
+}
+
+/*
+ * Constructor.
+ */
 CDBAdapterMongoDB::CDBAdapterMongoDB(){
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug("CDBAdapterMongoDB()");
-  #endif  
-  table_combi.insert(std::make_pair("pathfiltertablelookup","path,filter,dimension,tablename"));
-  table_combi.insert(std::make_pair("autoconfigure_dimensions","layer,ncname,ogcname,units"));
-  table_combi.insert(std::make_pair("all_other","path,time,dimtime,filedate"));
-  dataBaseConnection = NULL;
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop(">CDBAdapterMongoDB::CDBAdapterMongoDB");
+    #endif
+        
+    /* These were the three stores being used in the PostgreSQL driver, so reusing them. */
+    tableCombi.insert(std::make_pair("pathfiltertablelookup","path,filter,dimension,tablename"));
+    tableCombi.insert(std::make_pair("autoconfigure_dimensions","layer,ncname,ogcname,units"));
+    tableCombi.insert(std::make_pair("all_other","path,time,dimtime,filedate"));
+    
+    dataBaseConnection = NULL;
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop("<CDBAdapterMongoDB::CDBAdapterMongoDB");
+    #endif
 }
 
+/*
+ * Destructor.
+ */
 CDBAdapterMongoDB::~CDBAdapterMongoDB() {
-  mongo::BSONObj info_logging_out;
-  #ifdef CDBAdapterMongoDB_DEBUG  
-    CDBDebug("~CDBAdapterMongoDB()");
-  #endif  
-  if(dataBaseConnection!=NULL){
-    /* Don't know how to log out yet. TODO */
-    //dataBaseConnection->logout(configurationObject->DataBase[0]->attr.parameters.c_str(),&info_logging_out);
-  }
-  delete dataBaseConnection;
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop(">CDBAdapterMongoDB::~CDBAdapterMongoDB");
+    #endif
+        
+    mongo::BSONObj info_logging_out;
+    
+    /* Correctly logging off. */
+    if(dataBaseConnection!=NULL){
+        dataBaseConnection->logout("database", info_logging_out);
+    }
+    
+    /* And delete it! */
+    delete dataBaseConnection;
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop("<CDBAdapterMongoDB::~CDBAdapterMongoDB");
+    #endif
 }
 
+/*
+ * Getting the corrected Column name, based on the MongoDB structure.
+ * 
+ * @param   const char*   The column name as used in PostgreSQL.
+ * @return    const char*   The corrected column name.
+ */
 const char* CDBAdapterMongoDB::getCorrectedColumnName(const char* column_name) {
-  std::string prefix;
-  if(strcmp(column_name,"dimtime") == 0) {
-    prefix = "adaguc.dimension.time.";
-  }else {
-    prefix = "adaguc.";
-  }
-  prefix.append(column_name);
-  return prefix.c_str();
+        
+    std::string prefix = "adaguc.";
+        
+    return prefix.append(column_name).c_str();
 }
 
+/*
+ * Check if the ending of a string is as expected.
+ * 
+ * @param   std::string   The string to search in.
+ * @param   std::string   The expected ending of the string.
+ * @return    boolean     Was your assumption correct?
+ */
+bool hasEnding(std::string const &fullString, std::string const &ending) {
 
-bool hasEnding (std::string const &fullString, std::string const &ending) {
     if (fullString.length() >= ending.length()) {
         return (0 == fullString.compare (fullString.length() - ending.length(), ending.length(), ending));
     } else {
@@ -185,1062 +339,1509 @@ bool hasEnding (std::string const &fullString, std::string const &ending) {
 }
 
 /*
+ * Get the current used dimension.
+ * If no dimension is known to men, return 
+ * default dimension "time".
+ * 
+ * @return    const char*  The current used dimension.
+ */
+const char* getCurrentDimension() {
+  /* Get value, default is time. */
+  if (!conditionalSecondDimension.empty()) {
+    return conditionalSecondDimension.c_str();
+  } else {
+    return "time";
+  }
+}
+
+/*
+ * Check for the nth index of a string.
+ * 
+ * @param   char*     The string to search in.
+ * @param   char*     The string to search for
+ * @return    int     The nth occurence.
+ */
+int strpos(char *hayStack, char *needle, int nth) {
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop(">CDBAdapterMongoDB::strpos");
+    #endif
+        
+    char *res = hayStack;
+    for(int i = 1; i <= nth; i++)
+    {
+        res = strstr(res, needle);
+        if (!res) {
+            return -1;
+        } else if(i != nth) {
+            res = res + 1;
+        }
+    }
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop("<CDBAdapterMongoDB::strpos");
+    #endif
+        
+    return res - hayStack;
+}
+
+std::string numberToString(int pNumber)
+{
+ std::ostringstream oOStrStream;
+ oOStrStream << pNumber;
+ return oOStrStream.str();
+}
+
+/*
  *  Converting the query to a CDBStore, compatible with ADAGUC.
  * 
- *  @param 		DBClientCursor 		the cursor with a pointer to the query result.
- *  @param 		const char* 		Used for having the field names in the correct order.
- * 	@return		CDBStore::Store		The store containing the results.
+ *  @param    DBClientCursor    the cursor with a pointer to the query result.
+ *  @param    const char*     Used for having the field names in the correct order.
+ *  @return   CDBStore::Store   The store containing the results.
  */
-CDBStore::Store *ptrToStore(std::auto_ptr<mongo::DBClientCursor> cursor, const char* table) {
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug("[Function: ptrToStore]");
-  #endif
+CDBStore::Store *ptrToStore(std::auto_ptr<mongo::DBClientCursor> cursor, const char* table, int dimIndex, bool isAggregation = false, int limitInDocuments = 1) {
     
-  /* Prework. */
-  std::string delimiter = ",";
-  /* Fieldsnames cannot be collected from the query unfortunately. So we use 
-   * static fields. */
-  std::string usedColumns = table;
-  std::string the_file_name_of_the_granule;
-  std::string object_field_return;
-  
-  /* Variable used for determine if <filename>_<layername> is being used. */
-  bool using_extended_layerid = false;
-  
-  /* Number of columns that are being used. */
-  size_t colNumber = 0;
-  
-  /* If the pointer returns no records, return an empty store. */
-  if(!cursor->more()) {
-	CDBDebug("There are no records, so returning an empty store!");
-	CDBStore::ColumnModel *colModel = new CDBStore::ColumnModel(4);
-	
-	for(size_t j=0; j<colNumber;j++) {
-	  std::string cName = usedColumns.substr(0,usedColumns.find(delimiter));
-	  usedColumns.erase(0,usedColumns.find(delimiter) + 1);
-      colModel->setColumn(colNumber,cName.c_str());
-      colNumber++;
-    }
-    
-	CDBStore::Store *store=new CDBStore::Store(colModel);
-    return store;
-  }
-    
-   /* Get the first one. Get directly the adaguc object. */
-  mongo::BSONObj firstValue = cursor->next();
-  
-  /* Only applicable if table columns are equal to these. */
-  if(strcmp(table,"layer,ncname,ogcname,units") == 0) {
-    using_extended_layerid = true;
-    /* Instead of tablelayer + layername, for MongoDB we use fileName + _ + layername. */
-    the_file_name_of_the_granule = firstValue.getStringField("fileName");
-    the_file_name_of_the_granule.append("_");
-    }else if(strcmp(table,"time,") == 0) {
-	object_field_return = "dimension.time";
-    }
-  
-  /* Number of columns. */
-  size_t numCols = 0;
-  if(strcmp(object_field_return.c_str(),"dimension.time") == 0) {
-    numCols = firstValue.nFields();
-  } else if(strcmp(table, "path,time,dimtime") == 0) {
-	numCols = 3;
-  } else if(strcmp(table, "layer,ncname,ogcname,units") == 0) {
-	numCols = 4;
-  } else if(strcmp(table, "time,") == 0) {
-	numCols = 1;
-  } else {
-    numCols = firstValue.nFields();
-  } 
-    
-  CDBStore::ColumnModel *colModel = new CDBStore::ColumnModel(numCols);
-  
-  /* Making a copy of the used columns. */
-  usedColumns = table;
-  
-  /* Filling all column names. */
-  colNumber = 0;
-  for(size_t j = 0; j < numCols; j++) {
-	std::string cName = usedColumns.substr(0,usedColumns.find(delimiter));
-	usedColumns.erase(0,usedColumns.find(delimiter) + 1);
-	/* If true, it means the first column is layer. Make it layerid, so adaguc knows the column. */
-	if(j == 0 && true == using_extended_layerid) { cName.append("id"); }
-    colModel->setColumn(colNumber,cName.c_str());
-    colNumber++;
-  }
-  
-  /* Creating a store */
-  CDBStore::Store *store=new CDBStore::Store(colModel);
-  
-  usedColumns = table;
-  
-  /* Reset the colNumber. */
-  colNumber = 0;
-  
-  /* Using a vector for future purposes ( aggregations ). */
-  std::vector<mongo::BSONElement> vector_with_dimension_values;
-  std::vector<mongo::BSONElement>::iterator it;
-    
-  /* For the first record (which is already taken), push it directly first. */
-  CDBStore::Record *record = new CDBStore::Record(colModel);
-  for(size_t j = 0; j < numCols; j++) {
-      std::string cName = usedColumns.substr(0,usedColumns.find(delimiter));
-      usedColumns.erase(0,usedColumns.find(delimiter) + 1);
-      std::string fieldValue;
-      // If time or dimtime is being used:
-      if(strcmp(cName.c_str(),"time") == 0) {
-	vector_with_dimension_values = firstValue.getObjectField("adaguc").getField(cName.c_str()).Array();
-	it = vector_with_dimension_values.begin();
-	fieldValue = (*it).String(); ++it;
-      } else if(strcmp(cName.c_str(),"dimtime") == 0) {
-	fieldValue = "0";
-      } else if(strcmp(cName.c_str(), "ncname") == 0) {
-	fieldValue = current_used_dimension;
-      } else if(strcmp(cName.c_str(), "ogcname") == 0) {
-	size_t index = 0;
-	while(fieldValue.empty()) {
-	  fieldValue = firstValue.getObjectField("adaguc").getObjectField("layer").getObjectField(configurationObject->Layer[index++]->Variable[0]->value.c_str()).getObjectField("dimension").getObjectField(current_used_dimension).getStringField("ogcname");
-	}
-      } else if(strcmp(cName.c_str(), "layer") == 0) {
-	size_t index = 0;
-	while(fieldValue.empty()) {
-	  fieldValue = configurationObject->Layer[index++]->Variable[0]->value.c_str();
-	}
-      }else {
-	fieldValue = firstValue.getObjectField("adaguc").getStringField(cName.c_str());
-      }
-    
-      if(j == 0 && true == using_extended_layerid) {
-	fieldValue = the_file_name_of_the_granule.append(fieldValue); 
-      }
-      record->push(colNumber,fieldValue.c_str());
-      colNumber++;
-    } 
-  /* And push it! */
-  store->push(record);
-  
-  /* Reset the column number. */
-  colNumber = 0;
-  
-  /* Then the next values. */
-  while(cursor->more()) {
-    usedColumns = table;
-    mongo::BSONObj nextValue = cursor->next();
-    CDBStore::Record *record = new CDBStore::Record(colModel);
-    for(size_t j = 0; j < numCols; j++) {
-      std::string cName = usedColumns.substr(0,usedColumns.find(delimiter));
-      usedColumns.erase(0,usedColumns.find(delimiter) + 1);
-      std::string fieldValue;
-      // If time or dimtime is being used:
-      if(strcmp(cName.c_str(),"time") == 0) {
-	vector_with_dimension_values = nextValue.getObjectField("adaguc").getField(cName.c_str()).Array();
-	it = vector_with_dimension_values.begin();
-	fieldValue = (*it).String(); ++it;
-      } else if(strcmp(cName.c_str(),"dimtime") == 0) {
-	fieldValue = "0";
-      } else if(strcmp(cName.c_str(), "ncname") == 0) {
-	fieldValue = current_used_dimension;
-      } else if(strcmp(cName.c_str(), "ogcname") == 0) {
-	size_t index = 0;
-	while(fieldValue.empty()) {
-	  fieldValue = firstValue.getObjectField("adaguc").getObjectField("layer").getObjectField(configurationObject->Layer[index++]->Variable[0]->value.c_str()).getObjectField("dimension").getObjectField(current_used_dimension).getStringField("ogcname");
-	}
-      } else if(strcmp(cName.c_str(), "layer") == 0) {
-	size_t index = 0;
-	while(fieldValue.empty()) {
-	  fieldValue = configurationObject->Layer[index++]->Variable[0]->value.c_str();
-	}
-      }else {
-	fieldValue = nextValue.getObjectField("adaguc").getStringField(cName.c_str());
-      }
+    #ifdef MEASURETIME
+        StopWatch_Stop(">CDBAdapterMongoDB::ptrToStore");
+    #endif
+   
+    /* Prework. */
+    std::string delimiter = ",";
+    /* Fieldsnames cannot be collected from the query unfortunately. So we use static fields. */
+    std::string usedColumns = table;
+    std::string fileNameOfGranule;
+    /* Number of columns that are being used. */
+    size_t colNumber = 0;
 
-      if(j == 0 && true == using_extended_layerid) {
-	fieldValue = the_file_name_of_the_granule.append(fieldValue); 
-      }
-      record->push(colNumber,fieldValue.c_str());
-      colNumber++;
-    }
-    store->push(record);
-    colNumber = 0;
-  }
+    /* Variable used for determine if <filename>_<layername> is being used. */
+    bool usingExtendedLayerID = false;
   
-  return store;
-}
-
-int CDBAdapterMongoDB::setConfig(CServerConfig::XMLE_Configuration *cfg) {
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug("[Function: setConfig]");
-  #endif
-  configurationObject = cfg;
-  return 0;
-}
-
-/* Query needs to be defined. */
-CDBStore::Store *CDBAdapterMongoDB::getReferenceTime(const char *netcdfDimName,const char *netcdfTimeDimName,const char *timeValue,const char *timeTableName,const char *tableName) {
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug("[Function: getReferenceTime]");
-  #endif
-  return NULL;
-}
-
-/* Query needs to be defined. */
-CDBStore::Store *CDBAdapterMongoDB::getClosestDataTimeToSystemTime(const char *netcdfDimName,const char *tableName) {
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug("[Function: getClosestDataTimeToSystemTime]");
-  #endif
-  mongo::DBClientConnection * DB = getDataBaseConnection();
-  if(DB == NULL) {
-    return NULL;
-  }
+    /* Get the first one. Get directly the adaguc object. */
+    mongo::BSONObj firstValue;
   
-  /*
-  mongo::BSONObjBuilder querySelect;
-  querySelect << netcdfDimName << 1;
-  mongo::BSONObj objBSON = querySelect.obj();
-  
-  std::auto_ptr<mongo::DBClientCursor> cursorFromMongoDB;
-  cursorFromMongoDB = DB->query(tableName,mongo::Query(objBSON).sort("",1), 1, 0);
-  
-  DATENOW
-  //query.print("SELECT %s,abs(EXTRACT(EPOCH FROM (%s - now()))) as t from %s order by t asc limit 1",netcdfDimName,netcdfDimName,tableName);
-  return ptrToStore(cursorFromMongoDB, tableName.c_str());
-  */
-  
-  return NULL;
-}
-
-CT::string CDBAdapterMongoDB::getTableNameForPathFilterAndDimension(const char *path,const char *filter, const char * dimension,CDataSource *dataSource) {
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug("[Function: getTableNameForPathFilterAndDimension]");
-    CDBDebug("path = %s", path);
-  #endif
-  
-  CT::string the_path = path;
-  
-  /* Formatting the path, so the last part is only used. */
-  if(!hasEnding(path, "/")) {
-    CT::string delimiter = "/";
-    the_path.substringSelf(&the_path,(size_t)the_path.lastIndexOf("/") + 1,the_path.length());
-  }
-  
-  /* The path is the fileName of the granule in the MongoDB database. */
-  return the_path;
-}
-
-int CDBAdapterMongoDB::autoUpdateAndScanDimensionTables(CDataSource *dataSource) {
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug("[Function: autoUpdateAndScanDimensionTables]");
-  #endif
-  CServerParams *srvParams = dataSource->srvParams;;
-  CServerConfig::XMLE_Layer * cfgLayer = dataSource->cfgLayer;
-  mongo::DBClientConnection * DB = getDataBaseConnection();
-  if(DB == NULL) {
-    return -1;
-  }
-  
-  CCache::Lock lock;
-  CT::string identifier = "checkDimTables";  identifier.concat(cfgLayer->FilePath[0]->value.c_str());  identifier.concat("/");  identifier.concat(cfgLayer->FilePath[0]->attr.filter.c_str());  
-  CT::string cacheDirectory = srvParams->cfg->TempDir[0]->attr.value.c_str();
-  //srvParams->getCacheDirectory(&cacheDirectory);
-  if(cacheDirectory.length() > 0){
-    lock.claim(cacheDirectory.c_str(),identifier.c_str(),"checkDimTables",srvParams->isAutoResourceEnabled());
-  }
-  
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug("[checkDimTables]");
-  #endif
-  bool tableNotFound=false;
-  bool fileNeedsUpdate = false;
-  CT::string dimName;
-  for(size_t i=0;i<cfgLayer->Dimension.size();i++){
-    dimName=cfgLayer->Dimension[i]->attr.name.c_str();
-    
-    CT::string tableName;
-    try{
-      tableName = getTableNameForPathFilterAndDimension(cfgLayer->FilePath[0]->value.c_str(),cfgLayer->FilePath[0]->attr.filter.c_str(), dimName.c_str(),dataSource);
-    }catch(int e){
-      CDBError("Unable to create tableName from '%s' '%s' '%s'",cfgLayer->FilePath[0]->value.c_str(),cfgLayer->FilePath[0]->attr.filter.c_str(), dimName.c_str());
-      return 1;
-    }
-    
-    mongo::BSONObjBuilder queryForSelecting;
-    queryForSelecting << "adaguc.path" << 1 << "adaguc.filedate" << 1 << dimName.c_str() << 1 << "_id" << 0;
-    mongo::BSONObj objBSON = queryForSelecting.obj();
-    
-    mongo::BSONObjBuilder query_builder;
-    if(!hasEnding(tableName.c_str(), "/")) {
-      query_builder << "fileName" << tableName.c_str();
+    /* If the pointer returns no records, return an empty store. */
+    if(cursor->more()) {
+        firstValue = cursor->next();
+        if(firstValue.isEmpty() || firstValue.getObjectField("adaguc").isEmpty()) {
+            #ifdef MEASURETIME
+                StopWatch_Stop("<CDBAdapterMongoDB::ptrToStore");
+            #endif
+            return NULL;
+        }
     } else {
-      query_builder << "adaguc.dataSetPath" << tableName.c_str(); 
+        #ifdef MEASURETIME
+            StopWatch_Stop("<CDBAdapterMongoDB::ptrToStore");
+        #endif
+        return NULL;
     }
-    mongo::BSONObj the_query = query_builder.obj();
+  
+    /* Only applicable if table columns are equal to these. */
+    if(strcmp(table,tableCombi.find("autoconfigure_dimensions")->second.c_str()) == 0) {
+        usingExtendedLayerID = true;
+        /* Instead of tablelayer + layername, for MongoDB we use fileName + _ + layername. */
+        fileNameOfGranule = firstValue.getStringField("fileName");
+        fileNameOfGranule.append("_");
+    }
+  
+    CT::string gottenTable(table);
+    CT::string* columnsAsArray = gottenTable.splitToArray(",");
+    /* Number of columns. */
+    size_t numCols = columnsAsArray->count;
+
+    CDBStore::ColumnModel *colModel = new CDBStore::ColumnModel(numCols);
+  
+    /* Making a copy of the used columns. */
+    usedColumns = table;
+  
+    /* Filling all column names. */
+    for(size_t j = 0; j < numCols; j++) {
+        std::string cName = usedColumns.substr(0,usedColumns.find(delimiter));
+        usedColumns.erase(0,usedColumns.find(delimiter) + 1);
+        /* If true, it means the first column is layer. Make it layerid, so adaguc knows the column. */
+        if(j == 0 && true == usingExtendedLayerID) { cName.append("id"); }
+        colModel->setColumn(colNumber,cName.c_str());
+        colNumber++;
+    }
+  
+    /* Creating a store */
+    CDBStore::Store *store=new CDBStore::Store(colModel);
+
+    /* Using a vector for future purposes ( aggregations ). */
+    std::vector<mongo::BSONElement> VectorWithDimensionValues;
+    std::vector<mongo::BSONElement>::iterator it;
+    /* Reset the colNumber. */
+    colNumber = 0;
+
+    /* Getting the name of a 'step in the dimension'. */
+    std::string dimOfDimension = "dim";
+    dimOfDimension.append(getCurrentDimension());
+    const char* dimDimension = dimOfDimension.c_str();
+    
+    int numberOfTimes = 1;
+    int indexOfDimension = 0;
+    
+    if(strcmp(table,"time,") == 0) {
+        numberOfTimes = firstValue.getObjectField("adaguc").getField(getCurrentDimension()).Array().size();
+    }
+    if(strcmp(table,"path,time,dimtime") == 0 && limitInDocuments != 1 && isAggregation) {
+        indexOfDimension = dimIndex;
+        numberOfTimes = limitInDocuments + indexOfDimension;
+    }
+    
+    while(indexOfDimension < numberOfTimes) {
+        usedColumns = table;
+        
+        colNumber = 0;
+
+        CDBStore::Record *record = new CDBStore::Record(colModel);
+        
+        for(size_t j = 0; j < numCols; j++) {
+            std::string cName = usedColumns.substr(0,usedColumns.find(delimiter));
+            usedColumns.erase(0,usedColumns.find(delimiter) + 1);
+            std::string fieldValue;
+            // If time or dimtime is being used:
+            if(strcmp(cName.c_str(),getCurrentDimension()) == 0 || strcmp(cName.c_str(),"time2D") == 0) {
+                VectorWithDimensionValues = firstValue.getObjectField("adaguc").getField(cName.c_str()).Array();
+                if(numberOfTimes != 1 && isAggregation ) {
+                    fieldValue = VectorWithDimensionValues[indexOfDimension].str();
+                } else if ( isAggregation ) {
+                    fieldValue = VectorWithDimensionValues[dimIndex].str();
+                } else {
+                    fieldValue = VectorWithDimensionValues[0].str();
+                }
+            } else if(strcmp(cName.c_str(),dimDimension) == 0) {
+                if(numberOfTimes != 1 && isAggregation) {
+                    fieldValue = numberToString(indexOfDimension);
+                } else if ( isAggregation ) {
+                    fieldValue = numberToString(dimIndex);
+                } else {
+                    fieldValue = "0";
+                }
+            } else if(strcmp(cName.c_str(), "ncname") == 0) {
+                fieldValue = getCurrentDimension();
+            } else if(strcmp(cName.c_str(), "filedate") == 0) {
+                fieldValue = firstValue.getObjectField("adaguc").getStringField("filedate");
+            } else if(strcmp(cName.c_str(), "ogcname") == 0) {
+                const char* the_dimension = cfgLayer->Name[0]->value.c_str();
+                fieldValue = firstValue.getObjectField("adaguc").getObjectField("layer").getObjectField(the_dimension).getObjectField("dimension").getObjectField(getCurrentDimension()).getStringField("ogcname");
+            } else if(strcmp(cName.c_str(), "layer") == 0) {
+                fieldValue = cfgLayer->Name[0]->value.c_str();
+            } else {
+                fieldValue = firstValue.getObjectField("adaguc").getStringField(cName.c_str());
+            }
+            
+            if(j == 0 && true == usingExtendedLayerID) {
+                fieldValue = fileNameOfGranule.append(fieldValue); 
+            }
+            
+            record->push(colNumber,fieldValue.c_str());
+            colNumber++;
+        } 
+    
+        /* And push it! */
+        store->push(record);
+        indexOfDimension = indexOfDimension + 1;
+    }
+  
+    /* Then the next values. */
+    while(cursor->more()) {
+        mongo::BSONObj nextValue = cursor->next();
+        
+        if(strcmp(table,"path,time,dimtime") == 0 && limitInDocuments != 1 && isAggregation) {
+            indexOfDimension = dimIndex;
+        } else {
+            indexOfDimension = 0;
+        }
+        
+        while(indexOfDimension < numberOfTimes) {
+            usedColumns = table;
+            colNumber = 0;
+            CDBStore::Record *record = new CDBStore::Record(colModel);
+            for(size_t j = 0; j < numCols; j++) {
+                std::string cName = usedColumns.substr(0,usedColumns.find(delimiter));
+                usedColumns.erase(0,usedColumns.find(delimiter) + 1);
+                std::string fieldValue;
+                // If time or dimtime is being used:
+                if(strcmp(cName.c_str(),getCurrentDimension()) == 0 || strcmp(cName.c_str(),"time2D") == 0) {
+                    VectorWithDimensionValues = nextValue.getObjectField("adaguc").getField(cName.c_str()).Array();
+                    if(numberOfTimes != 1 && isAggregation) {
+                        fieldValue = VectorWithDimensionValues[indexOfDimension].str();
+                    } else if ( isAggregation ) {
+                        fieldValue = VectorWithDimensionValues[dimIndex].str();
+                    } else {
+                        fieldValue = VectorWithDimensionValues[0].str();
+                    }
+                } else if(strcmp(cName.c_str(),dimDimension) == 0) {
+                    if(numberOfTimes != 1 && isAggregation) {
+                        fieldValue = numberToString(indexOfDimension);
+                    } else if ( isAggregation ) {
+                        fieldValue = numberToString(dimIndex);
+                    } else {
+                        fieldValue = "0";
+                    }
+                } else if(strcmp(cName.c_str(), "ncname") == 0) {
+                    fieldValue = getCurrentDimension();
+                } else if(strcmp(cName.c_str(), "filedate") == 0) {
+                    fieldValue = nextValue.getObjectField("adaguc").getStringField("filedate");
+                } else if(strcmp(cName.c_str(), "ogcname") == 0) {
+                    const char* the_dimension = cfgLayer->Name[0]->value.c_str();
+                    fieldValue = nextValue.getObjectField("adaguc").getObjectField("layer").getObjectField(the_dimension).getObjectField("dimension").getObjectField(getCurrentDimension()).getStringField("ogcname");
+                } else if(strcmp(cName.c_str(), "layer") == 0) {
+                    fieldValue = cfgLayer->Name[0]->value.c_str();
+                } else {
+                    fieldValue = nextValue.getObjectField("adaguc").getStringField(cName.c_str());
+                }
+                
+                if(j == 0 && true == usingExtendedLayerID) {
+                    fieldValue = fileNameOfGranule.append(fieldValue); 
+                }
+                record->push(colNumber,fieldValue.c_str());
+                colNumber++;
+            } 
+            
+            store->push(record);
+            indexOfDimension = indexOfDimension + 1;
+        }
+    }
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop("<CDBAdapterMongoDB::ptrToStore");
+    #endif
+  
+    return store;
+}
+
+/*
+ * Setting the config file.
+ * 
+ * @param   XMLE_Configuration  The config file.
+ * @return    int     Returns 0. 
+ */
+int CDBAdapterMongoDB::setConfig(CServerConfig::XMLE_Configuration *cfg) {
+        
+    configurationObject = cfg;
+
+    return 0;
+}
+
+/*
+ * Not made yet!
+ */
+CDBStore::Store *CDBAdapterMongoDB::getReferenceTime(const char *netcdfDimName,const char *netcdfTimeDimName,const char *timeValue,const char *timeTableName,const char *tableName) {
+    
+    return NULL;
+}
+
+/*
+ * Not made yet!
+ */
+CDBStore::Store *CDBAdapterMongoDB::getClosestDataTimeToSystemTime(const char *netcdfDimName,const char *tableName) {
+    
+    mongo::DBClientConnection * DB = getDataBaseConnection();
+    
+    if(DB == NULL) {
+        return NULL;
+    }
+  
+    /*
+    mongo::BSONObjBuilder querySelect;
+    querySelect << netcdfDimName << 1;
+    mongo::BSONObj objBSON = querySelect.obj();
     
     std::auto_ptr<mongo::DBClientCursor> cursorFromMongoDB;
+    cursorFromMongoDB = DB->query(tableName,mongo::Query(objBSON).sort("",1), 1, 0);
     
-    cursorFromMongoDB = DB->query("database.datagranules",mongo::Query(the_query),1, 0, &objBSON);
-    CDBStore::Store *store = ptrToStore(cursorFromMongoDB, table_combi.find("pathfiltertablelookup")->second.c_str());
-    if(store==NULL){
-      tableNotFound=true;
-      CDBDebug("No table found for dimension %s",dimName.c_str());
-    }
-    
-    if(tableNotFound == false){
-      if(srvParams->isAutoLocalFileResourceEnabled()==true){
-        try{
-          CT::string databaseTime = store->getRecord(0)->get(1);if(databaseTime.length()<20){databaseTime.concat("Z");}databaseTime.setChar(10,'T');
-          
-          CT::string fileDate = CDirReader::getFileDate(store->getRecord(0)->get(0)->c_str());
-          
-          if(databaseTime.equals(fileDate)==false){
-            CDBDebug("Table was found, %s ~ %s : %d",fileDate.c_str(),databaseTime.c_str(),databaseTime.equals(fileDate));
-            fileNeedsUpdate = true;
-          }
-          
-        }catch(int e){
-          CDBDebug("Unable to get filedate from database, error: %s",CDBStore::getErrorMessage(e));
-          fileNeedsUpdate = true;
-        }
-      }
-    }
-    
-    delete store;
-    if(tableNotFound||fileNeedsUpdate)break;
-  }
+    DATENOW
+    //query.print("SELECT %s,abs(EXTRACT(EPOCH FROM (%s - now()))) as t from %s order by t asc limit 1",netcdfDimName,netcdfDimName,tableName);
+    return ptrToStore(cursorFromMongoDB, tableName.c_str());
+    */
   
-  if(fileNeedsUpdate == true){
-    //Recreate table
-    if(srvParams->isAutoLocalFileResourceEnabled()==true){
-      for(size_t i=0;i<cfgLayer->Dimension.size();i++){
+    return NULL;
+}
+
+/*
+ * Retrieving the filename of the granule or dataset.
+ * 
+ * @param     const char*   The full path of the granule/dataset.
+ * @param   const char*   Not used.
+ * @param   const char*   Not used.
+ * @param   CDataSource   A data source containing all information of the chosen granule/dataset.
+ * @return    CT::string    Name of the granule/dataset.
+ */
+CT::string CDBAdapterMongoDB::getTableNameForPathFilterAndDimension(const char *path,const char *filter, const char * dimension,CDataSource *dataSource) {
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop(">CDBAdapterMongoDB::getTableNameForPathFilterAndDimension");
+    #endif
+
+    /*
+     * If there is a secondary dimension, get it here.
+     */
+
+    if(dimension != NULL && strcmp(currentUsedDimension,dimension) != 0 && 
+        strcmp(currentUsedDimension,"") != 0) {
+        conditionalSecondDimension = "";
+        conditionalSecondDimension.concat(dimension);
+    }
+  
+    /* Setting the current layer as a global variable. Needs to be used in the ptrToStore.
+     * Chosen to be a global variable, may be improved in the future. 
+     */
+    cfgLayer = dataSource->cfgLayer;
+
+    /* Making a string, so method of the CT::string class can be used. */
+    CT::string thePath = path;
+    /* Get the 6th part of the splitted string. This is always the dataset name. */
+    dataSetName = thePath.splitToArray("/")[5].c_str();
+    dataSetVersion = thePath.splitToArray("/")[6].c_str();
+
+    /* Formatting the path, so the last part is only used. */
+    if(!hasEnding(path, "/")) {
+        /* If it doesn't end with the '/' character, it is a granule. */
+        thePath.substringSelf(&thePath,(size_t)thePath.lastIndexOf("/") + 1,thePath.length());
+    }
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop("<CDBAdapterMongoDB::getTableNameForPathFilterAndDimension");
+    #endif
+  
+    /* The path is the fileName of the granule or dataSetName of a dataset in the MongoDB database. */
+    return thePath;
+}
+
+/*
+ * Not totally finished. Completing when writing to DB is done.
+ */
+int CDBAdapterMongoDB::autoUpdateAndScanDimensionTables(CDataSource *dataSource) {
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop(">CDBAdapterMongoDB::autoUpdateAndScanDimensionTables");
+    #endif
+        
+    mongo::DBClientConnection * DB = getDataBaseConnection();
+    if(DB == NULL) {
+        return -1;
+    }
+        
+    CServerParams *srvParams = dataSource->srvParams;
+    CServerConfig::XMLE_Layer * cfgLayer = dataSource->cfgLayer;
+  
+    CCache::Lock lock;
+    CT::string identifier = "checkDimTables";  identifier.concat(cfgLayer->FilePath[0]->value.c_str());  identifier.concat("/");  identifier.concat(cfgLayer->FilePath[0]->attr.filter.c_str());  
+    CT::string cacheDirectory = srvParams->cfg->TempDir[0]->attr.value.c_str();
+    //srvParams->getCacheDirectory(&cacheDirectory);
+    if(cacheDirectory.length() > 0){
+        lock.claim(cacheDirectory.c_str(),identifier.c_str(),"checkDimTables",srvParams->isAutoResourceEnabled());
+    }
+  
+    #ifdef CDBAdapterMongoDB_DEBUG
+        CDBDebug("[checkDimTables]");
+    #endif
+        
+    bool tableNotFound=false;
+    bool fileNeedsUpdate = false;
+    CT::string dimName;
+    for(size_t i=0;i<cfgLayer->Dimension.size();i++){
         dimName=cfgLayer->Dimension[i]->attr.name.c_str();
-      
+    
         CT::string tableName;
         try{
-          tableName = getTableNameForPathFilterAndDimension(cfgLayer->FilePath[0]->value.c_str(),cfgLayer->FilePath[0]->attr.filter.c_str(), dimName.c_str(),dataSource);
+            tableName = getTableNameForPathFilterAndDimension(cfgLayer->FilePath[0]->value.c_str(),cfgLayer->FilePath[0]->attr.filter.c_str(), dimName.c_str(),dataSource);
         }catch(int e){
-          CDBError("Unable to create tableName from '%s' '%s' '%s'",cfgLayer->FilePath[0]->value.c_str(),cfgLayer->FilePath[0]->attr.filter.c_str(), dimName.c_str());
-          return 1;
+            CDBError("Unable to create tableName from '%s' '%s' '%s'",cfgLayer->FilePath[0]->value.c_str(),cfgLayer->FilePath[0]->attr.filter.c_str(), dimName.c_str());
+            return 1;
         }
-        CDBFileScanner::markTableDirty(&tableName);
-        //CDBDebug("Dropping old table (if exists)",tableName.c_str());
-        CT::string query ;
-        query.print("drop table %s",tableName.c_str());
-        CDBDebug("Try to %s for %s",query.c_str(),dimName.c_str());
-        dataBaseConnection->query(query.c_str());
-      }
-      tableNotFound = true;
+    
+        CT::string dimNameAdaguc = "adaguc.";
+        dimNameAdaguc.concat(dimName.c_str());
+        currentUsedDimension = dimName.c_str();
+        
+        mongo::BSONObjBuilder queryForSelecting;
+        queryForSelecting << "adaguc.path" << 1 << "adaguc.filedate" << 1 << dimNameAdaguc.c_str() << 1 << "_id" << 0;
+        mongo::BSONObj objBSON = queryForSelecting.obj();
+        
+        mongo::BSONObjBuilder query_builder;
+        if(!hasEnding(tableName.c_str(), "/")) {
+            query_builder << "fileName" << tableName.c_str() << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion;
+        } else {
+            query_builder << "adaguc.dataSetPath" << tableName.c_str() << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion; 
+        }
+        
+        mongo::BSONObj the_query = query_builder.obj();
+        
+        std::auto_ptr<mongo::DBClientCursor> cursorFromMongoDB;
+        
+        cursorFromMongoDB = DB->query(dataGranulesTableMongoDB,mongo::Query(the_query),1, 0, &objBSON);
+
+        CT::string columnToReturn = "path,filedate,";
+        columnToReturn.concat(dimName.c_str());
+        
+        CDBStore::Store *store = ptrToStore(cursorFromMongoDB, columnToReturn.c_str(), 0);
+        
+        if(store==NULL){
+            tableNotFound=true;
+            CDBDebug("No table found for dimension %s",dimNameAdaguc.c_str());
+        }
+        
+        if(tableNotFound == false){
+            if(srvParams->isAutoLocalFileResourceEnabled()==true){
+                try{
+                    CT::string databaseTime = store->getRecord(0)->get(1);if(databaseTime.length()<20){databaseTime.concat("Z");}databaseTime.setChar(10,'T');
+            
+                    CT::string fileDate = CDirReader::getFileDate(store->getRecord(0)->get(0)->c_str());
+            
+                if(databaseTime.equals(fileDate)==false){
+                    CDBDebug("Table was found, %s ~ %s : %d",fileDate.c_str(),databaseTime.c_str(),databaseTime.equals(fileDate));
+                    fileNeedsUpdate = false;
+                }
+            
+                }catch(int e){
+                    CDBDebug("Unable to get filedate from database, error: %s",CDBStore::getErrorMessage(e));
+                    fileNeedsUpdate = true;
+                }
+            }
+        }
+        
+        delete store;
+        if(tableNotFound||fileNeedsUpdate)break;
     }
-   
-  }
+  
+    if(fileNeedsUpdate == true){
+        //Recreate table
+        if(srvParams->isAutoLocalFileResourceEnabled()==true){
+            for(size_t i=0;i<cfgLayer->Dimension.size();i++){
+                dimName=cfgLayer->Dimension[i]->attr.name.c_str();
+      
+                CT::string tableName;
+                try{
+                    tableName = getTableNameForPathFilterAndDimension(cfgLayer->FilePath[0]->value.c_str(),cfgLayer->FilePath[0]->attr.filter.c_str(), dimName.c_str(),dataSource);
+                }catch(int e){
+                    CDBError("Unable to create tableName from '%s' '%s' '%s'",cfgLayer->FilePath[0]->value.c_str(),cfgLayer->FilePath[0]->attr.filter.c_str(), dimName.c_str());
+                    return 1;
+                }
+                
+                CDBFileScanner::markTableDirty(&tableName);
+                //CDBDebug("Dropping old table (if exists)",tableName.c_str());
+                CT::string query ;
+                query.print("drop table %s",tableName.c_str());
+                CDBDebug("Try to %s for %s",query.c_str(),dimName.c_str());
+                dataBaseConnection->query(query.c_str());
+            }
+        tableNotFound = true;
+        }
+    }
  
-  if(tableNotFound){
-    if(srvParams->isAutoLocalFileResourceEnabled()==true){
-
-      CDBDebug("Updating database");
-      int status = CDBFileScanner::updatedb(dataSource,NULL,NULL,0);
-      if(status !=0){CDBError("Could not update db for: %s",cfgLayer->Name[0]->value.c_str());return 2;}
-    }else{
-      CDBDebug("No table found for dimension %s and autoresource is disabled",dimName.c_str());
-      return 1;
+    if(tableNotFound){
+        if(srvParams->isAutoLocalFileResourceEnabled()==true){
+            CDBDebug("Updating database");
+            int status = CDBFileScanner::updatedb(dataSource,NULL,NULL,0);
+            if(status !=0){CDBError("Could not update db for: %s", cfgLayer->Name[0]->value.c_str());return 2;}
+        }else{
+            CDBDebug("No table found for dimension %s and autoresource is disabled",dimName.c_str());
+            return 1;
+        }
     }
-  }
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug("[/checkDimTables]");
-  #endif
-  lock.release();
-  return 0;
+    
+    #ifdef CDBAdapterMongoDB_DEBUG
+        CDBDebug("[/checkDimTables]");
+    #endif
+    lock.release();
+    #ifdef MEASURETIME
+        StopWatch_Stop("<CDBAdapterMongoDB::autoUpdateAndScanDimensionTables");
+    #endif
+    return 0;
 }
 
+/*
+ * Getting the minimum value of multiple records.
+ * 
+ * @param     const char*   The current used dimension.
+ * @param   const char*   The fileName or dataSetPath.
+ * @return    CDBStore::Store   A store containing the minimum value.
+ */
 CDBStore::Store *CDBAdapterMongoDB::getMin(const char *name,const char *table) {
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug("[Function: getMin]");
-  #endif
-  mongo::DBClientConnection * DB = getDataBaseConnection();
-  if(DB == NULL) {
-    return NULL;
-  }
-  
-  /* Get the correct MongoDB path. */
-  std::string used_name = getCorrectedColumnName(name);
-  
-  mongo::BSONObjBuilder query_builder;
-  if(!hasEnding(table, "/")) {
-    query_builder << "fileName" << table;
-  } else {
-    query_builder << "adaguc.dataSetPath" << table; 
-  }
-  mongo::BSONObj query_object = query_builder.obj();
-  
-  /* Executing the query and sort by name, in ascending order. */
-  mongo::Query query = mongo::Query(query_object).sort(used_name,1);
-  
-  mongo::BSONObjBuilder selecting_builder;
-  selecting_builder << used_name.c_str() << 1 << "_id" << 0;
-  mongo::BSONObj selecting_query = selecting_builder.obj();
-  
-  /* MongoDB uses std::auto_ptr for getting all records. */
-  std::auto_ptr<mongo::DBClientCursor> cursorFromMongoDB;
-  cursorFromMongoDB = DB->query("database.datagranules",query, 1, 0, &selecting_query);
-  
-  std::string buff = name;
-  buff.append(",");
-  CDBStore::Store *minStore = ptrToStore(cursorFromMongoDB, buff.c_str());
-  
-  if(minStore == NULL){
-    setExceptionType(InvalidDimensionValue);
-    CDBError("Invalid dimension value for  %s",name);
-    CDBError("query failed"); 
-    return NULL;
-  }
-  return minStore;
-}
-
-CDBStore::Store *CDBAdapterMongoDB::getMax(const char *name,const char *table) {
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug("[Function: getMax]");
-    CDBDebug("Name is %s, fileName is %s", name, table);
-  #endif
-  mongo::DBClientConnection * DB = getDataBaseConnection();
-  if(DB == NULL) {
-    return NULL;
-  }
-  /* Get the correct MongoDB path. */
-  std::string used_name = getCorrectedColumnName(name);
-  
-  mongo::BSONObjBuilder query_builder;
-  if(!hasEnding(table, "/")) {
-    query_builder << "fileName" << table;
-  } else {
-    query_builder << "adaguc.dataSetPath" << table; 
-  }
-  mongo::BSONObj query_object = query_builder.obj();
-  
-  /* Executing the query and sort by name, in ascending order. */
-  mongo::Query query = mongo::Query(query_object).sort(used_name,-1);
-  
-  mongo::BSONObjBuilder selecting_builder;
-  selecting_builder << used_name.c_str() << 1 << "_id" << 0;
-  mongo::BSONObj selecting_query = selecting_builder.obj();
-  
-  /* MongoDB uses std::auto_ptr for getting all records. */
-  std::auto_ptr<mongo::DBClientCursor> cursorFromMongoDB;
-  cursorFromMongoDB = DB->query("database.datagranules",query, 1, 0, &selecting_query);
-  
-  std::string buff = name;
-  buff.append(",");
-  CDBStore::Store *maxStore = ptrToStore(cursorFromMongoDB, buff.c_str());
-  
-  if(maxStore == NULL){
-    setExceptionType(InvalidDimensionValue);
-    CDBError("Invalid dimension value for  %s",name);
-    CDBError("query failed"); 
-    return NULL;
-  }
-  return maxStore; 
-}
-
-CDBStore::Store *CDBAdapterMongoDB::getUniqueValuesOrderedByValue(const char *name, int limit, bool orderDescOrAsc,const char *table) {
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug("[Function: getUniqueValuesOrderedByValue]");
-    CDBDebug("name = %s, table = %s", name, table);
-  #endif
-  mongo::DBClientConnection * DB = getDataBaseConnection();
-  if(DB == NULL) {
-    return NULL;
-  }
-
-  /* The corrected name. Because of MongoDB, it can be that  */
-  const char* corrected_name = getCorrectedColumnName(name);
-  std::string tmp_string_corrected_name(corrected_name);
-  
-  /* What do we want to select? Only the name variable. */
-  mongo::BSONObjBuilder queryBSON;
-  queryBSON << corrected_name << 1 << "_id" << 0;
-  mongo::BSONObj queryObj = queryBSON.obj();
-  
-  /* The query itself. */
-  
-  mongo::BSONObjBuilder query_itself;
-  if(!hasEnding(table, "/")) {
-    query_itself << "fileName" << table;
-  } else {
-    query_itself << "adaguc.dataSetPath" << table; 
-  }
-  mongo::BSONObj the_query = query_itself.obj();
-  
-  mongo::Query query = mongo::Query(the_query).sort(tmp_string_corrected_name.c_str(), orderDescOrAsc ? 1 : -1);
-
-  std::auto_ptr<mongo::DBClientCursor> cursorFromMongoDB;
-  
-  cursorFromMongoDB = DB->query("database.datagranules", query, limit, 0, &queryObj);
-  
-  std::string columns = name;
-  columns.append(",");
-  
-  CDBStore::Store *store = ptrToStore(cursorFromMongoDB, columns.c_str());
-  
-  if(store == NULL){
-    CDBDebug("Query %s failed",query.toString().c_str());
-  }
-  return store;
-}
-
-CDBStore::Store *CDBAdapterMongoDB::getUniqueValuesOrderedByIndex(const char *name, int limit, bool orderDescOrAsc,const char *table) {
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug("[Function: getUniqueValuesOrderedByIndex]");
-  #endif
-  mongo::DBClientConnection * DB = getDataBaseConnection();
-  if(DB == NULL) {
-    return NULL;
-  }
-
-  /* The corrected name. Because of MongoDB, it can be that  */
-  const char* corrected_name = getCorrectedColumnName(name);
-  
-  std::string dimension_name = "dim";
-  dimension_name.append(name);
-  const char * corrected_dim_name = getCorrectedColumnName(dimension_name.c_str());
-  
-  /* What do we want to select? Only the name variable. */
-  mongo::BSONObjBuilder queryBSON;
-  queryBSON << corrected_name << 1 << corrected_dim_name << 1 << "_id" << 0;
-  mongo::BSONObj queryObj = queryBSON.obj();
-  
-  /* The query itself. */
-  mongo::BSONObjBuilder query_itself;
-  if(!hasEnding(table, "/")) {
-    query_itself << "fileName" << table;
-  } else {
-    query_itself << "adaguc.dataSetPath" << table; 
-  }
-  mongo::BSONObj the_query = query_itself.obj();
-  
-  /* Sorting on multiple fields. So creating a BSON */
-  mongo::BSONObjBuilder sorting_fields_builder;
-  sorting_fields_builder << corrected_name << 1 << corrected_dim_name << 1;
-  mongo::BSONObj sorting_fields = sorting_fields_builder.obj();
-  
-  mongo::Query query = mongo::Query(the_query).sort(sorting_fields);
-
-  std::auto_ptr<mongo::DBClientCursor> cursorFromMongoDB;
-  
-  cursorFromMongoDB = DB->query("database.datagranules", query, limit, 0, &queryObj);
-  
-  std::string columns = name;
-  columns.append(",");
-  
-  CDBStore::Store *store = ptrToStore(cursorFromMongoDB, columns.c_str());
-  
-  CT::string *r1 = store->getRecord(0)->get(0);
-  CDBDebug("%s", r1->c_str());
-  
-  if(store == NULL){
-    CDBDebug("Query %s failed",query.toString().c_str());
-  }
-  return store;
-}
-
-CDBStore::Store *CDBAdapterMongoDB::getFilesAndIndicesForDimensions(CDataSource *dataSource,int limit) {
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug("[Function: getFilesAndIndicesForDimensions]");
-    CDBDebug("limit is %d", limit);
-  #endif
-  mongo::DBClientConnection * DB = getDataBaseConnection();
-  
-  CT::string queryParams(&dataSource->requiredDims[0]->value);
-  
-  CT::string tableName;
-    try{
-      tableName = getTableNameForPathFilterAndDimension(dataSource->cfgLayer->FilePath[0]->value.c_str(),dataSource->cfgLayer->FilePath[0]->attr.filter.c_str(), "",dataSource);
-    }catch(int e){
-      CDBError("Unable to create tableName");
-      return NULL;
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop(">CDBAdapterMongoDB::getMin");
+    #endif
+        
+    mongo::DBClientConnection * DB = getDataBaseConnection();
+    if(DB == NULL) {
+        return NULL;
     }
-   
-  mongo::BSONObjBuilder query_builder;
-  if(!hasEnding(tableName.c_str(), "/")) {
-    query_builder << "fileName" << tableName.c_str();
-  } else { 
-    query_builder << "adaguc.dataSetPath" << tableName.c_str();
-  }
+
+    /* Get the correct MongoDB path of the current used dimension. */
+    std::string usedName = getCorrectedColumnName(name);
   
-  const char* queryParams_char = queryParams.c_str();
-  std::string queryParams_std(queryParams_char);
+    /* Selecting query. */
+    mongo::BSONObjBuilder queryBuilder;
+    if(!hasEnding(table, "/")) {
+        queryBuilder << "fileName" << table << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion;
+    } else {
+        queryBuilder << "adaguc.dataSetPath" << table << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion; 
+    }
+    mongo::BSONObj queryObject = queryBuilder.obj();
   
-  boost::replace_all(queryParams_std, "T", " ");
-  boost::erase_all(queryParams_std, "Z");
+    /* Executing the query and sort by name, in ascending order. */
+    mongo::Query query = mongo::Query(queryObject).sort(usedName,1);
+    
+    // -------------------------------
+    
+    std::auto_ptr<mongo::DBClientCursor> checkForAggregation = DB->query(dataGranulesTableMongoDB, query , 1, 0);
+    
+    bool isAggregation = checkForAggregation->next().getObjectField("adaguc").getField(getCurrentDimension()).Array().size() > 1;
+    
+    // -------------------------------
   
-  query_builder << getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()) << queryParams_std.c_str();
+    mongo::BSONObjBuilder queryForSelecting;
+    if (isAggregation) {
+        queryForSelecting << usedName.c_str() << BSON("$slice" << 1) << "_id" << 0;
+    } else {
+        queryForSelecting << usedName.c_str() << 1 << "_id" << 0;
+    }
+    mongo::BSONObj objBSON = queryForSelecting.obj();
   
-  mongo::BSONObj the_query = query_builder.obj();
+    /* MongoDB uses std::auto_ptr for getting all records. */
+    std::auto_ptr<mongo::DBClientCursor> cursorFromMongoDB;
+    cursorFromMongoDB = DB->query(dataGranulesTableMongoDB,query, 1, 0, &objBSON);
   
-  mongo::BSONObjBuilder selecting_builder;
-  selecting_builder << "adaguc.path" << 1 << getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()) << 1 << "_id" << 0;
+    /* Only need one record, so only the 'name' variable. */
+    std::string buff = name;
+    buff.append(",");
+    CDBStore::Store *minStore = ptrToStore(cursorFromMongoDB, buff.c_str(), 0);
   
-  mongo::BSONObj selecting_query = selecting_builder.obj();
+    if(minStore == NULL){
+        setExceptionType(InvalidDimensionValue);
+        CDBError("Invalid dimension value for  %s",name);
+        CDBError("query failed"); 
+        return NULL;
+    }
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop("<CDBAdapterMongoDB::getMin");
+    #endif
+        
+    return minStore; 
+}
+
+/*
+ * Getting the maximum value of multiple records.
+ * 
+ * @param     const char*   The current used dimension.
+ * @param   const char*   The fileName or dataSetPath.
+ * @return    CDBStore::Store   A store containing the maximum value.
+ */
+CDBStore::Store *CDBAdapterMongoDB::getMax(const char *name,const char *table) {
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop(">CDBAdapterMongoDB::getMax");
+    #endif
+
+    mongo::DBClientConnection * DB = getDataBaseConnection();
+    if(DB == NULL) {
+        return NULL;
+    }
+    
+    /* Get the correct MongoDB path. */
+    std::string usedName = getCorrectedColumnName(name);
   
-  std::auto_ptr<mongo::DBClientCursor> ptrToMongo = DB->query("database.datagranules", mongo::Query(the_query).sort(getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()),-1), 1, 0, &selecting_query);
+    mongo::BSONObjBuilder queryBuilder;
+    if(!hasEnding(table, "/")) {
+        queryBuilder << "fileName" << table << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion;
+    } else {
+        queryBuilder << "adaguc.dataSetPath" << table << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion; 
+    }
+    mongo::BSONObj queryObject = queryBuilder.obj();
   
-  CDBStore::Store *store = ptrToStore(ptrToMongo, "path,time,dimtime");
+    /* Executing the query and sort by name, in ascending order. */
+    mongo::Query query = mongo::Query(queryObject).sort(usedName,-1);
+    
+    // -------------------------------
+    
+    std::auto_ptr<mongo::DBClientCursor> checkForAggregation = DB->query(dataGranulesTableMongoDB, query , 1, 0);
+    
+    bool isAggregation = checkForAggregation->next().getObjectField("adaguc").getField(getCurrentDimension()).Array().size() > 1;
+    
+    // -------------------------------
   
-  if(store != NULL) {
+    mongo::BSONObjBuilder selectingBuilder;
+    if (isAggregation) {
+        selectingBuilder << usedName.c_str() << BSON("$slice" << -1) << "_id" << 0;
+    } else {
+        selectingBuilder << usedName.c_str() << 1 << "_id" << 0;
+    }
+    mongo::BSONObj selectingQuery = selectingBuilder.obj();
+  
+    /* MongoDB uses std::auto_ptr for getting all records. */
+    std::auto_ptr<mongo::DBClientCursor> cursorFromMongoDB;
+    cursorFromMongoDB = DB->query(dataGranulesTableMongoDB,query, 1, 0, &selectingQuery);
+  
+    std::string buff = name;
+    buff.append(",");
+    
+    CDBStore::Store *maxStore = ptrToStore(cursorFromMongoDB, buff.c_str(), 0);
+  
+    if(maxStore == NULL){
+        setExceptionType(InvalidDimensionValue);
+        CDBError("Invalid dimension value for  %s",name);
+        CDBError("query failed"); 
+        return NULL;
+    }
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop("<CDBAdapterMongoDB::getMax");
+    #endif
+        
+    return maxStore; 
+}
+
+/*
+ * Getting unique values ordered by a selected value.
+ * 
+ * @param   const char*   The value to sort on.
+ * @param     int       The limit for record to return.
+ * @param   boolean     Ordered ascending or descending.
+ * @param     const char*   The name or datasetpath.
+ * @return    CDBStore::Store   A store containing the values ordered by value.
+ */
+CDBStore::Store *CDBAdapterMongoDB::getUniqueValuesOrderedByValue(const char *name, int limit, bool orderDescOrAsc,const char *table) {
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop(">CDBAdapterMongoDB::getUniqueValuesOrderedByValue");
+    #endif
+        
+    mongo::DBClientConnection * DB = getDataBaseConnection();
+    if(DB == NULL) {
+        return NULL;
+    }
+
+    /* The corrected name. PostgreSQL columns are different compared to MongoDB fields.  */
+    const char* correctedName = getCorrectedColumnName(name);
+    std::string correctedNameAsString(correctedName);
+
+    /* What do we want to select? Only the name variable. */
+    mongo::BSONObjBuilder queryBSON;
+    queryBSON << correctedName << 1 << "_id" << 0;
+    mongo::BSONObj queryObj = queryBSON.obj();
+  
+    /* The query itself. */
+    mongo::BSONObjBuilder theQuery;
+    if(!hasEnding(table, "/")) {
+        theQuery << "fileName" << table  << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion;
+    } else {
+        theQuery << "adaguc.dataSetPath" << table << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion; 
+    }
+    mongo::BSONObj queryAsObj = theQuery.obj();
+  
+    /* Making a query sorted by the selected value. */
+    mongo::Query query = mongo::Query(queryAsObj).sort(correctedNameAsString.c_str(), orderDescOrAsc ? 1 : -1);
+
+    std::auto_ptr<mongo::DBClientCursor> cursorFromMongoDB;
+    cursorFromMongoDB = DB->query(dataGranulesTableMongoDB, query, limit, 0, &queryObj);
+
+    /* Again, only one column must be returned. */
+    std::string columns = name;
+    columns.append(",");
+    
+    // -------------------------------
+    
+    std::auto_ptr<mongo::DBClientCursor> checkForAggregation = DB->query(dataGranulesTableMongoDB, query , 1, 0);
+    
+    bool isAggregation = checkForAggregation->next().getObjectField("adaguc").getField(getCurrentDimension()).Array().size() > 1;
+    
+    // -------------------------------
+  
+    CDBStore::Store *store = ptrToStore(cursorFromMongoDB, columns.c_str(), 0, isAggregation);
+
+    if(store == NULL){
+        CDBDebug("Query %s failed",query.toString().c_str());
+    }
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop("<CDBAdapterMongoDB::getUniqueValuesOrderedByValue");
+    #endif
+        
     return store;
-  }
-  return NULL;
 }
 
-/* Query needs to be defined. */
-CDBStore::Store *CDBAdapterMongoDB::getFilesForIndices(CDataSource *dataSource,size_t *start,size_t *count,ptrdiff_t *stride,int limit) {
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug("[Function: getFilesForIndices]");
-    CDBDebug("Dimension %s FilePath %s", dataSource->requiredDims[0]->netCDFDimName.c_str(), dataSource->cfgLayer->FilePath[0]->value.c_str());
-    CDBDebug("%d %d %d %d %d Limit %d", count[0], count[1], count[2], count[3], count[4], limit);
-  #endif
-  mongo::DBClientConnection * DB = getDataBaseConnection();
+/*
+ * Getting unique values ordered by a index.
+ * NOTE: Only used if dimension is not time dimension.
+ * 
+ * @param   const char*   The value to sort on.
+ * @param     int       The limit for record to return.
+ * @param   boolean     Ordered ascending or descending.
+ * @param     const char*   The name or datasetpath.
+ * @return    CDBStore::Store   A store containing the values ordered by value.
+ */
+CDBStore::Store *CDBAdapterMongoDB::getUniqueValuesOrderedByIndex(const char *name, int limit, bool orderDescOrAsc,const char *table) {
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop(">CDBAdapterMongoDB::getUniqueValuesOrderedByIndex");
+    #endif
+        
+    mongo::DBClientConnection * DB = getDataBaseConnection();
+    if(DB == NULL) {
+        return NULL;
+    }
+
+    /* The corrected name. Because of MongoDB, it can be that  */
+    const char* correctedName = getCorrectedColumnName(name);
   
-  /* Selecting the granule with the specific fileName. */
-  mongo::BSONObjBuilder query;
+    std::string dimensionName = "dim";
+    dimensionName.append(name);
+    const char * correctedDimName = getCorrectedColumnName(dimensionName.c_str());
   
-  const char* string_for_name = dataSource->cfgLayer->FilePath[0]->value.c_str();
+    /* What do we want to select? Only the name variable. */
+    mongo::BSONObjBuilder queryBSON;
+    queryBSON << correctedName << 1 << correctedDimName << 1 << "_id" << 0;
+    mongo::BSONObj queryObj = queryBSON.obj();
   
-  if(!hasEnding(string_for_name, "/")) {
-    query << "adaguc.path" << string_for_name;
-  } else { 
-    query << "adaguc.dataSetPath" << string_for_name;
-  }
-  mongo::BSONObj objBSON = query.obj();
+    /* The query itself. */
+    mongo::BSONObjBuilder queryItself;
+    if(!hasEnding(table, "/")) {
+        queryItself << "fileName" << table << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion;
+    } else {
+        queryItself << "adaguc.dataSetPath" << table << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion; 
+    }
+    mongo::BSONObj theQuery = queryItself.obj();
   
-  std::string time_field = "adaguc.";
-  time_field.append(dataSource->requiredDims[0]->netCDFDimName.c_str());
+    /* Sorting on multiple fields. So creating a BSON */
+    mongo::BSONObjBuilder sortingFieldsBuilder;
+    sortingFieldsBuilder << correctedName << 1 << correctedDimName << 1;
+    mongo::BSONObj sortingFields = sortingFieldsBuilder.obj();
   
-  /* Figure out what dimension is being used. 
-   * This is stored in the dataSets collection. */
-  mongo::BSONObjBuilder data_set_name_builder;
-  data_set_name_builder << "adaguc.path" <<  1 << time_field.c_str() << 1 << "_id" << 0;
-  mongo::BSONObj data_set_name_obj = data_set_name_builder.obj();
+    mongo::Query query = mongo::Query(theQuery).sort(sortingFields);
   
-  int nToSkip = 0;
-  int limit_in_documents = 0; 
+    std::auto_ptr<mongo::DBClientCursor> cursorFromMongoDB = DB->query(dataGranulesTableMongoDB, query, limit, 0, &queryObj);
   
-  if(count[2] == 0) {
-    limit_in_documents = 0;
-  } else {
-    limit_in_documents = 1;
-    nToSkip = count[4];
-  }
+    std::string columns = name;
+    columns.append(",");
   
-  std::auto_ptr<mongo::DBClientCursor> ptrToMongo = DB->query("database.datagranules", mongo::Query(objBSON).sort(time_field,1) , limit_in_documents, nToSkip, &data_set_name_obj); 
+    CDBStore::Store *store = ptrToStore(cursorFromMongoDB, columns.c_str(), 0);
   
-  CDBStore::Store *store = ptrToStore(ptrToMongo, "path,time,dimtime");
-  
-  return store;
+    if(store == NULL){
+        CDBDebug("Query %s failed",query.toString().c_str());
+    }
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop("<CDBAdapterMongoDB::getUniqueValuesOrderedByIndex");
+    #endif
+        
+    return store;
 }
 
-CDBStore::Store *CDBAdapterMongoDB::getDimensionInfoForLayerTableAndLayerName(const char *layertable,const char *layername) {
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug("[Function: getDimensionInfoForLayerTableAndLayerName]");
-    CDBDebug("layertable is %s, layername is %s", layertable, layername);
-  #endif
+/*
+ * Getting all the necessary data for different granules.
+ * 
+ * @param   CDataSource   A source containing all information from the XML and more.
+ * @param   int       Limiting the results.
+ * @return    CDBStore::Store   The result in Store form.
+ */
+CDBStore::Store *CDBAdapterMongoDB::getFilesAndIndicesForDimensions(CDataSource *dataSource,int limit) {
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop(">CDBAdapterMongoDB::getFilesAndIndicesForDimensions");
+    #endif
   
-  /* First getting the database connection. */
-  mongo::DBClientConnection * DB = getDataBaseConnection();
-  if(DB == NULL) {
+    /* Getting the database connection. */
+    mongo::DBClientConnection* DB = getDataBaseConnection();
+    if(DB == NULL) {
+        return NULL;
+    }
+  
+    /* Setting the current used dimension for further use. */
+    currentUsedDimension = dataSource->requiredDims[0]->netCDFDimName.c_str();
+    CT::string queryParams(dataSource->requiredDims[0]->value);
+  
+    /* Getting the correct fileName or dataSetName. */
+    CT::string tableName;
+    try{
+        tableName = getTableNameForPathFilterAndDimension(dataSource->cfgLayer->FilePath[0]->value.c_str(),dataSource->cfgLayer->FilePath[0]->attr.filter.c_str(), currentUsedDimension,dataSource);
+    } catch(int e){
+        CDBError("Unable to create tableName");
+        return NULL;
+    }
+  
+    /* Building the query. */
+    mongo::BSONObjBuilder queryBuilder;
+    if(!hasEnding(tableName.c_str(), "/")) {
+        queryBuilder << "fileName" << tableName.c_str() << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion;
+    } else { 
+        queryBuilder << "adaguc.dataSetPath" << tableName.c_str() << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion;
+    }
+  
+    /* The time must be without the 'T' and 'Z' characters, so erasing them. */
+    const char* queryParamsChar = queryParams.c_str();
+    std::string queryParamsString(queryParamsChar);
+  
+    boost::replace_all(queryParamsString, "T", " ");
+    boost::erase_all(queryParamsString, "Z");
+
+    /* If the time value has got a '/' character, it means a range.
+     * Split it up and use $gte and $lt. */
+    if (queryParamsString.find("/") != std::string::npos) {
+        CT::string convertedToCtString(queryParamsString.c_str());
+        CT::string* splittedString = convertedToCtString.splitToArray("/");
+        queryBuilder << getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()) << mongo::GTE << splittedString[0].c_str() << mongo::LT << splittedString[1].c_str();
+    } else {
+        /* We don't have a time range. */
+        queryBuilder << getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()) << queryParamsString.c_str();
+    }
+  
+    mongo::BSONObj theQuery = queryBuilder.obj();
+  
+    mongo::BSONObjBuilder selectingBuilder;
+    selectingBuilder << "adaguc.path" << 1 << getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()) << 1 << "_id" << 0;
+  
+    mongo::BSONObj selectingQuery = selectingBuilder.obj();
+    
+    /* --------------------------------- */
+    /*   Getting the index (dimIndex).   */
+    /* --------------------------------- */
+    // The index is by default 0. ( for non aggregations )
+    int dimIndex = 0;
+    
+    // Only need 1 field in return, the time field.
+    mongo::BSONObjBuilder indexBuilder;
+    indexBuilder << getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()) << 1 << "_id" << 0;
+    mongo::BSONObj indexFieldSelector = indexBuilder.obj();
+    
+    // Executing the query, limiting the query to 1.
+    std::auto_ptr<mongo::DBClientCursor> pointerToMongoResultSet = DB->query(dataGranulesTableMongoDB, mongo::Query(theQuery), 1, 0, &indexFieldSelector);
+    
+    // Boolean for checking if the granule is an aggregation. By default false.
+    bool isAggregation = false;
+    
+    if(pointerToMongoResultSet->more()) {
+        mongo::BSONObj value = pointerToMongoResultSet->next();
+        std::vector<mongo::BSONElement> dimensionValues = value.getObjectField("adaguc").getField(dataSource->requiredDims[0]->netCDFDimName.c_str()).Array();
+
+        for(size_t index = 0; index < dimensionValues.size(); index++) {
+            if(strcmp(dimensionValues[index].valuestr(),queryParamsString.c_str()) == 0) {
+                isAggregation = true;
+                dimIndex = index;
+            }
+        }
+    }
+    /* --------------------------------- */
+  
+    std::auto_ptr<mongo::DBClientCursor> ptrToMongo = DB->query(dataGranulesTableMongoDB, mongo::Query(theQuery).sort(getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()),-1), 1, 0, &selectingQuery);
+
+    std::string labels = "path,";
+    labels.append(dataSource->requiredDims[0]->netCDFDimName.c_str());
+    labels.append(",dim");
+    labels.append(dataSource->requiredDims[0]->netCDFDimName.c_str());
+
+    CDBStore::Store *store = ptrToStore(ptrToMongo, labels.c_str(), dimIndex, isAggregation);
+  
+    if(store != NULL) {
+        return store;
+    }
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop("<CDBAdapterMongoDB::getFilesAndIndicesForDimensions");
+    #endif
+        
     return NULL;
-  }
-  /* Old code. Must be deleted, but for reference it will be kept. */
-  //std::string buff(layertable);
-  //buff.append("_");
-  //buff.append(layername);
-  
-  /* Selecting the granule with the specific fileName. */
-  mongo::BSONObjBuilder query;
-  if(!hasEnding(layertable, "/")) {
-    query << "fileName" << layertable;
-  } else { 
-    query << "adaguc.dataSetPath" << layertable;
-  }
-  mongo::BSONObj objBSON = query.obj();
-  
-  /* Figure out what dimension is being used. 
-   * This is stored in the dataSets collection. */
-  mongo::BSONObjBuilder data_set_name_builder;
-  data_set_name_builder << "dataSetName" << 1 << "_id" << 0;
-  mongo::BSONObj data_set_name_obj = data_set_name_builder.obj();
-  
-  std::auto_ptr<mongo::DBClientCursor> ptrForName = DB->query("database.datagranules", mongo::Query(objBSON), 1, 0, &data_set_name_obj);
-  const char* data_set_name;
-  if(ptrForName->more()) {
-    data_set_name = ptrForName->next().getStringField("dataSetName"); 
-  } else {
-    data_set_name = ""; 
-    #ifdef CDBAdapterMongoDB_DEBUG
-      CDBDebug("No dataSetName specified in granule");
-    #endif
-  }
-  
-  /* Getting the dimension. */
-  mongo::BSONObjBuilder data_set_builder;
-  data_set_builder << "dataSetName" << data_set_name;
-  mongo::BSONObj data_set_query = data_set_builder.obj();
-  
-  mongo::BSONObjBuilder data_set_selecting;
-  data_set_selecting << "dimension" << 1 << "_id" << 0;
-  mongo::BSONObj data_set_selecting_obj = data_set_selecting.obj();
-  
-  std::auto_ptr<mongo::DBClientCursor> ptrForDimension = DB->query("database.dataSets", mongo::Query(data_set_query), 1, 0, &data_set_selecting_obj);
-  const char* dimension_name;
-  if(ptrForDimension->more()) {
-    dimension_name = ptrForDimension->next().getStringField("dimension"); 
-  } else {
-    dimension_name = ""; 
-    #ifdef CDBAdapterMongoDB_DEBUG
-      CDBDebug("No dimension specified in the dataset");
-    #endif
-  }
-  
-  /* Selecting the fields that must be returned. Named:
-   * 												layer, ncname, ogcname and units. */
-  // Easy, just the fileName field of the granule document.
-  const char* filename_name = "fileName";
-  // The layer name, so getting it from the config file.
-  const char* layer_name = configurationObject->Layer[0]->Variable[0]->value.c_str();
-  // The ncname is in fact the dimension_name.
-  const char* ncname_name = dimension_name;
-  // The ogcname can be different compared to the ncname, so getting it out of the db.
-  std::string ogcname_name_as_string;
-  ogcname_name_as_string.append("adaguc.layer.");
-  ogcname_name_as_string.append(layername);
-  ogcname_name_as_string.append(".dimension.");
-  ogcname_name_as_string.append(ncname_name);
-  const char* ogcname_name = ogcname_name_as_string.c_str();
-  // Units is just declared in the 
-  const char* units_name = "adaguc.units";
-  
-  current_used_dimension = ncname_name;
-  
-  mongo::BSONObjBuilder selectingColumns;
-  selectingColumns << filename_name << 1 << layer_name << 1 << ogcname_name << 1 << units_name << 1 << "_id" << 0;
-  mongo::BSONObj selectedColumns = selectingColumns.obj();
-  
-  /* Collecting the results. */
-  std::auto_ptr<mongo::DBClientCursor> cursorFromMongoDB;
-  cursorFromMongoDB = DB->query("database.datagranules",mongo::Query(objBSON), 1, 0, &selectedColumns);
-
-  /* Making a store of it. */
-  CDBStore::Store *store = ptrToStore(cursorFromMongoDB, table_combi.find("autoconfigure_dimensions")->second.c_str());
-  if(store==NULL){
-    CDBDebug("No dimension info stored for %s",layername);
-  }
-  return store;
 }
 
+/*
+ * Getting all the necessary data for different granules.
+ * 
+ * @param   CDataSource   A source containing all information from the XML and more.
+ * @param   size_t      Not used.
+ * @param   size_t      Not used.
+ * @param   ptrdiff_t   Not used.
+ * @param   int       Limiting the results.
+ * @return    CDBStore::Store   The result in Store form.
+ */
+CDBStore::Store *CDBAdapterMongoDB::getFilesForIndices(CDataSource *dataSource,size_t *start,size_t *count,ptrdiff_t *stride,int limit) {
+
+    #ifdef MEASURETIME
+        StopWatch_Stop(">CDBAdapterMongoDB::getFilesForIndices");
+    #endif
+        
+    mongo::DBClientConnection * DB = getDataBaseConnection();
+    if(DB == NULL) {
+        return NULL;
+    }
+  
+    currentUsedDimension = dataSource->requiredDims[0]->netCDFDimName.c_str();
+ 
+    /* Selecting the granule with the specific fileName. */
+    mongo::BSONObjBuilder query;
+  
+    const char* stringForName = dataSource->cfgLayer->FilePath[0]->value.c_str();
+  
+    if(!hasEnding(stringForName, "/")) {
+        query << "adaguc.path" << stringForName << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion;
+    } else { 
+        query << "adaguc.dataSetPath" << stringForName << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion;
+    }
+    mongo::BSONObj objBSON = query.obj();
+  
+    mongo::BSONObjBuilder dataSetNameBuilder;
+    dataSetNameBuilder << "adaguc.path" <<  1 << "_id" << 0;
+  
+    std::string timeField = "adaguc.";
+  
+    for(size_t i=0;i<dataSource->requiredDims.size();i++){
+        timeField = "adaguc.";
+        timeField.append(dataSource->requiredDims[i]->netCDFDimName.c_str());
+        dataSetNameBuilder << timeField.c_str() << 1;
+    }
+  
+    mongo::BSONObj dataSetNameObj = dataSetNameBuilder.obj();
+  
+    int dimIndex = 0;
+    int limitInDocuments = 0; 
+  
+    if(count[2] == 0) {
+        limitInDocuments = 0;
+    } else {
+        limitInDocuments = count[0];
+        dimIndex = start[0];
+    }
+    
+    // -------------------------------
+    
+    std::auto_ptr<mongo::DBClientCursor> checkForAggregation = DB->query(dataGranulesTableMongoDB, mongo::Query(objBSON) , 1, 0);
+    
+    bool isAggregation = checkForAggregation->next().getObjectField("adaguc").getField(getCurrentDimension()).Array().size() > 1;
+    
+    // -------------------------------
+  
+    std::auto_ptr<mongo::DBClientCursor> ptrToMongo;
+    if ( isAggregation ) {
+        ptrToMongo = DB->query(dataGranulesTableMongoDB, mongo::Query(objBSON).sort(timeField,1) , limitInDocuments, 0, &dataSetNameObj); 
+    } else {
+        ptrToMongo = DB->query(dataGranulesTableMongoDB, mongo::Query(objBSON).sort(timeField,1) , limitInDocuments, dimIndex, &dataSetNameObj); 
+    }
+  
+    std::string labels = "path,";
+  
+    for(size_t i=0;i<dataSource->requiredDims.size();i++){
+        labels.append(dataSource->requiredDims[i]->netCDFDimName.c_str());
+        labels.append(",dim");
+        labels.append(dataSource->requiredDims[i]->netCDFDimName.c_str());
+    }
+
+    CDBStore::Store *store = ptrToStore(ptrToMongo, labels.c_str(), dimIndex, isAggregation, limitInDocuments);
+  
+    #ifdef MEASURETIME
+        StopWatch_Stop("<CDBAdapterMongoDB::getFilesForIndices");
+    #endif
+        
+    return store;
+}
+
+/*
+ * Getting all the necessary data for different granules.
+ * 
+ * @param   const char*   The filename or dataSetName.
+ * @param   const char*   The layer that is being used.
+ * @return    CDBStore::Store   The store containing the results.
+ */
+CDBStore::Store *CDBAdapterMongoDB::getDimensionInfoForLayerTableAndLayerName(const char *layertable,const char *layername) {
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop(">CDBAdapterMongoDB::getDimensionInfoForLayerTableAndLayerName");
+    #endif
+  
+    /* First getting the database connection. */
+    mongo::DBClientConnection * DB = getDataBaseConnection();
+    if(DB == NULL) {
+        return NULL;
+    }
+  
+    /* Selecting the granule with the specific fileName. */
+    mongo::BSONObjBuilder query;
+    if(!hasEnding(layertable, "/")) {
+        query << "fileName" << layertable << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion;
+    } else { 
+        query << "adaguc.dataSetPath" << layertable << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion;
+    }
+    mongo::BSONObj objBSON = query.obj();
+  
+    /* Figure out what dimension is being used. 
+     * This is stored in the dataSets collection. */
+    /* Getting the dimension. */
+    mongo::BSONObjBuilder dataSetBuilder;
+    dataSetBuilder << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion;
+    mongo::BSONObj dataSetQuery = dataSetBuilder.obj();
+  
+    mongo::BSONObjBuilder dataSetSelecting;
+    dataSetSelecting << "dimension" << 1 << "_id" << 0;
+    mongo::BSONObj dataSetSelectingObj = dataSetSelecting.obj();
+  
+    /* Executing the query. */
+    std::auto_ptr<mongo::DBClientCursor> ptrForDimension = DB->query(dataSetsTableMongoDB, mongo::Query(dataSetQuery), 1, 0, &dataSetSelectingObj);
+    
+    const char* dimensionName;
+    if(ptrForDimension->more()) {
+        dimensionName = ptrForDimension->next().getStringField("dimension"); 
+    } else {
+        dimensionName = ""; 
+        return NULL;
+    }
+  
+    /* Selecting the fields that must be returned. Named:
+     * layer, ncname, ogcname and units. */
+    // The layer name, so getting it from the config file.
+    const char* layerName = configurationObject->Layer[3]->Variable[0]->value.c_str();
+    // The ncname is in fact the dimensionName.
+    const char* ncName = dimensionName;
+    // The ogcname can be different compared to the ncname, so getting it out of the db.
+    
+    std::string ogcNameAsString;
+    ogcNameAsString.append("adaguc.layer.");
+    ogcNameAsString.append(layername);
+    ogcNameAsString.append(".dimension");
+    const char* ogcname_name = ogcNameAsString.c_str();
+    // Units is just declared in the 
+    const char* units = "adaguc.units";
+  
+    currentUsedDimension = ncName;
+
+    mongo::BSONObjBuilder selectingColumns;
+    selectingColumns << layerName << 1 << ogcname_name << 1 << units << 1 << "_id" << 0;
+    mongo::BSONObj selectedColumns = selectingColumns.obj();
+  
+    mongo::BSONObjBuilder selectingCorrectGranule;
+    if(!hasEnding(layertable, "/")) {
+        selectingCorrectGranule << "fileName" << layertable << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion;
+    } else { 
+        selectingCorrectGranule << "adaguc.dataSetPath" << layertable << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion;
+    }
+    mongo::BSONObj selectingCorrectGranuleObj = selectingCorrectGranule.obj();
+
+    /* Collecting the results. */
+    std::auto_ptr<mongo::DBClientCursor> cursorFromMongoDB;
+    cursorFromMongoDB = DB->query(dataGranulesTableMongoDB,mongo::Query(selectingCorrectGranuleObj), 1, 0, &selectedColumns);
+
+    /* Making a store of it. */
+    CDBStore::Store *store = ptrToStore(cursorFromMongoDB, tableCombi.find("autoconfigure_dimensions")->second.c_str(), 0);
+  
+    if(store==NULL){
+        CDBDebug("No dimension info stored for %s",layername);
+    }
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop("<CDBAdapterMongoDB::getDimensionInfoForLayerTableAndLayerName");
+    #endif
+        
+    return store;
+}
+
+/*
+ * Storing dimension info about granules into the MongoDB database.
+ */
 int CDBAdapterMongoDB::storeDimensionInfoForLayerTableAndLayerName(const char *layertable,const char *layername,const char *netcdfname,const char *ogcname,const char *units) {
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug("[Function: storeDImensionInfoForLayerTableAndLayerName]");
-  #endif
-  /* First getting the database connection. */
-  mongo::DBClientConnection * DB = getDataBaseConnection();
-  if(DB == NULL) {
-    return -1;
-  }
-  /* Old code. Kept for references. */
-  //std::string buff(layertable);
-  //buff.append("_");
-  //buff.append(layername);
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop(">CDBAdapterMongoDB::storeDimensionInfoForLayerTableAndLayerName");
+    #endif
+    
+    /* First getting the database connection. */
+    mongo::DBClientConnection * DB = getDataBaseConnection();
+    if(DB == NULL) {
+        return -1;
+    }
   
-  /* Selecting the right granule. */
-  mongo::BSONObjBuilder query;
-  query << "fileName" << layertable;
-  mongo::BSONObj selectedGranule = query.obj();
+    /* Selecting the right granule. */
+    mongo::BSONObjBuilder query;
+    query << "fileName" << layertable << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion;
+    mongo::BSONObj selectedGranule = query.obj();
+   
+    CT::string updateString = "adaguc.layer.";
+    updateString.concat(layername);
+    updateString.concat(".dimension.");
+    updateString.concat(netcdfname);
+    updateString.concat(".ogcname");
+   
+    mongo::BSONObjBuilder queryCheck;
+    queryCheck << "$set" << BSON("adaguc.units" << units << updateString.c_str() << ogcname);
+    mongo::BSONObj objBSONCheck = queryCheck.obj();
+   
+    /* Update the right granule. */
+    DB->update(dataGranulesTableMongoDB, mongo::Query(selectedGranule), objBSONCheck);
   
-  /* The data to be stored. */
-  query << "adaguc.layer" << layername << "adaguc.ncname" << netcdfname << "adaguc.ogcname" << ogcname << "adaguc.units" << units;
-  mongo::BSONObj objBSON = query.obj();
-  
-  /* Update the right granule. */
-  DB->update("database.datagranules", mongo::Query(selectedGranule), objBSON);
-  
-  /* Query to see if record was succesfuly added. */
-  std::auto_ptr<mongo::DBClientCursor> cursorFromMongoDB;
-  
-  mongo::BSONObjBuilder queryCheck;
-  queryCheck << "fileName" << layertable << "adaguc.layer" << layername;
-  mongo::BSONObj objBSONCheck = queryCheck.obj();
-  
-  cursorFromMongoDB = DB->query("database.datagranules",objBSONCheck);
-  
-  /* If no records are found.. */
-  if(!cursorFromMongoDB->more()){
-    CDBError("Unable to insert record");
-    throw(__LINE__); 
-  }
-  return 0;
+    #ifdef MEASURETIME
+        StopWatch_Stop("<CDBAdapterMongoDB::storeDimensionInfoForLayerTableAndLayerName");
+    #endif
+        
+    return 0;
 }
 
-//TODO IMPLEMENT THIS METHOD!!!
+/*
+ * Probably not used.
+ */
 int CDBAdapterMongoDB::removeDimensionInfoForLayerTableAndLayerName(const char *layertable,const char *layername) {
-  CDBError("CDBAdapterMongoDB::removeDimensionInfoForLayerTableAndLayerName is not YET implemented !!!!");
-  throw(-1);
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop(">CDBAdapterMongoDB::removeDimensionInfoForLayerTableAndLayerName");
+    #endif
+        
+    mongo::DBClientConnection * DB = getDataBaseConnection();
+    if(DB == NULL) {
+        return -1;
+    }
+    
+    mongo::BSONObjBuilder query;
+    query << "fileName" << layertable;
+    mongo::BSONObj objBSON = query.obj();
+    
+    /* When it's being used, implement it! */
+    //DB->remove(dataGranulesTableMongoDB,mongo::Query(objBSON),true);
+    
+    if(DB->getPrevError().isEmpty()) {
+        throw(__LINE__);
+    }
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop("<CDBAdapterMongoDB::removeDimensionInfoForLayerTableAndLayerName");
+    #endif
+        
+    return 0;
 }
     
-/* Not used anymore? */
+/*
+ * Not used anymore. Must be kept, because ADAGUC expects it exists.
+ */
 int CDBAdapterMongoDB::dropTable(const char *tablename) {
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug("[Function: dropTable]");
-  #endif
-  mongo::DBClientConnection * DB = getDataBaseConnection();
-  if(DB == NULL) {
-    return -1;
-  }
-  bool status = false;
-  status = DB->dropCollection(tablename);
-  if(!status) {
-    CDBError("Dropping the table failed");
-    return 1;
-  }
-  return 0; 
+    
+    mongo::DBClientConnection * DB = getDataBaseConnection();
+    if(DB == NULL) {
+        return -1;
+    }
+    
+    return 0; 
 }
 
 int CDBAdapterMongoDB::createDimTableOfType(const char *dimname,const char *tablename,int type) {
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug("[Function: createDimTableOfType]");
-    CDBDebug("Dimtype is: %zu", type);
-  #endif
-  mongo::DBClientConnection * DB = getDataBaseConnection();
-  if(DB == NULL) {
-    return -1;
-  }
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop(">CDBAdapterMongoDB::createDimTableOfType");
+    #endif
+        
+    mongo::DBClientConnection * DB = getDataBaseConnection();
+    if(DB == NULL) {
+        return -1;
+    }
   
-  CT::string tableColumns("path varchar (511)");
+    CT::string tableColumns("path varchar (511)");
    
-  if(type == 3)tableColumns.printconcat(", %s timestamp, dim%s int",dimname,dimname);
-  if(type == 2)tableColumns.printconcat(", %s varchar (64), dim%s int",dimname,dimname);
-  if(type == 1)tableColumns.printconcat(", %s real, dim%s int",dimname,dimname);
-  if(type == 0)tableColumns.printconcat(", %s int, dim%s int",dimname,dimname);
+    if(type == 3)tableColumns.printconcat(", %s timestamp, dim%s int",dimname,dimname);
+    if(type == 2)tableColumns.printconcat(", %s varchar (64), dim%s int",dimname,dimname);
+    if(type == 1)tableColumns.printconcat(", %s real, dim%s int",dimname,dimname);
+    if(type == 0)tableColumns.printconcat(", %s int, dim%s int",dimname,dimname);
   
-  tableColumns.printconcat(", filedate timestamp");
-  tableColumns.printconcat(", PRIMARY KEY (path, %s)",dimname);
+    tableColumns.printconcat(", filedate timestamp");
+    tableColumns.printconcat(", PRIMARY KEY (path, %s)",dimname);
   
-  int status = 0;
+    int status = 0;
   
-  status = checkTableMongo(tablename,tableColumns.c_str());
-  return status;
+    status = checkTableMongo(tablename,tableColumns.c_str());
+  
+    #ifdef MEASURETIME
+        StopWatch_Stop("<CDBAdapterMongoDB::createDimTableOfType");
+    #endif
+        
+    return status;
 }
 
 int CDBAdapterMongoDB::createDimTableInt(const char *dimname,const char *tablename) {
-  return createDimTableOfType(dimname,tablename,0);
+    return createDimTableOfType(dimname,tablename,0);
 }
 
 int CDBAdapterMongoDB::createDimTableReal(const char *dimname,const char *tablename) {
-  return createDimTableOfType(dimname,tablename,1);
+    return createDimTableOfType(dimname,tablename,1);
 }
 
 int CDBAdapterMongoDB::createDimTableString(const char *dimname,const char *tablename) {
-  return createDimTableOfType(dimname,tablename,2);
+    return createDimTableOfType(dimname,tablename,2);
 }
 
 int CDBAdapterMongoDB::createDimTableTimeStamp(const char *dimname,const char *tablename) {
-  return createDimTableOfType(dimname,tablename,3);
+    return createDimTableOfType(dimname,tablename,3);
 }
 
+/*
+ * Checking if the files exists in the MongoDB collection.
+ * 
+ * @param   const char*   The filename or dataSetName.
+ * @param   const char*   The layer that is being used.
+ * @return    int     The result. 1 for doesn't exist, 0 for exists!
+ */
 int CDBAdapterMongoDB::checkIfFileIsInTable(const char *tablename,const char *filename) {
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug("[Function: checkIfFileIsInTable]");
-    CDBDebug("The fileName is %s, and the path is %s",tablename, filename);
-  #endif
-  int fileIsOK = 1;
-  mongo::DBClientConnection * DB = getDataBaseConnection();
-  if(DB == NULL) {
-    return -1;
-  }
-  std::auto_ptr<mongo::DBClientCursor> cursorFromMongoDB;
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop(">CDBAdapterMongoDB::checkIfFileIsInTable");
+    #endif
+        
+    mongo::DBClientConnection * DB = getDataBaseConnection();
+    if(DB == NULL) {
+        return -1;
+    }
   
-  /* Granule needs to have the correct fileName and the correct path. */
-  mongo::BSONObjBuilder query;
-  query << "fileName" << tablename << "adaguc.path" << filename;
-  mongo::BSONObj objBSON = query.obj();
+    /* Granule needs to have the correct fileName and the correct path. */
+    mongo::BSONObjBuilder query;
+    query << "fileName" << tablename << "adaguc.path" << filename << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion;
+    mongo::BSONObj objBSON = query.obj();
   
-  std::string table_name = "database.datagranules";
+    /* Converting the path from the granule to the datasetpath. */
+    CT::string fileNameAsString(filename);
+    char * file = (char*) filename;
   
-  /* Third parameter is number of results. */
-  cursorFromMongoDB = DB->query(table_name, mongo::Query(objBSON));
+    int position = strpos(file, "/", 8);
+    fileNameAsString.substringSelf(&fileNameAsString, 0, position);
+    fileNameAsString.concat("/");
   
-  /* If there is result, and the next one is valid ( so no $err.. ) */
-  if(cursorFromMongoDB->more()) {
-    if(cursorFromMongoDB->next().isValid()) {
-      fileIsOK=0;
-	} else {
-      fileIsOK=1;
-	}
-  } else {
-    fileIsOK=1;
-  }
+    /* Writing it once! */
+    if(!configWritten) {
+        writeConfigXMLToDatabase(filename,fileNameAsString.c_str());
+        configWritten = true;
+    }
   
-  return fileIsOK; 
+    /* Third parameter is number of results. */
+    std::auto_ptr<mongo::DBClientCursor> cursorFromMongoDB = DB->query(dataGranulesTableMongoDB, mongo::Query(objBSON));
+  
+    /* If there is result, and the next one is valid ( so no $err.. ) */
+    int fileIsOK = 1;
+    if(cursorFromMongoDB->more()) {
+        if(cursorFromMongoDB->next().isValid()) {
+            fileIsOK=0;  
+        } else {
+            fileIsOK=1;
+        }
+    } else {
+        fileIsOK=1;
+    }
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop("<CDBAdapterMongoDB::checkIfFileIsInTable");
+    #endif
+  
+    return fileIsOK; 
 }
     
-/* Not used anymore? */
+/*
+ * Removing a file.
+ * 
+ * @param   const char*     The name of the table ( which is always the same ).
+ * @param   const char*     The file to remove ( full path ).
+ */
 int CDBAdapterMongoDB::removeFile(const char *tablename,const char *file) {
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug("[Function: removeFile]");
-    CDBDebug("Deleting %s from %s", file, tablename);
-  #endif
-  mongo::DBClientConnection * DB = getDataBaseConnection();
-  if(DB == NULL) {
-    return -1;
-  }
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop(">CDBAdapterMongoDB::removeFile");
+    #endif
+        
+    mongo::DBClientConnection * DB = getDataBaseConnection();
+    if(DB == NULL) {
+        return -1;
+    }
   
-  /* Status will never change. Remove function is a void. 
-   * Also, no param pointers are being used, so no feedback. */
-  int status = 0;
-  mongo::BSONObjBuilder query;
-  query << "path" << file;
-  mongo::BSONObj objBSON = query.obj();
-  /* Third param is true, this means after one record has been found, it stops. */
-  DB->remove(tablename,mongo::Query(objBSON),true);
+    mongo::BSONObjBuilder query;
+    query << "path" << file;
+    mongo::BSONObj objBSON = query.obj();
+    /* Third param is true, this means after one record has been found, it stops. */
+    //DB->remove(tablename,mongo::Query(objBSON),true);
   
-  if(status != 0) {
-    throw(__LINE__);
-  }
-  return status;
+    if(DB->getPrevError().isEmpty()) {
+        throw(__LINE__);
+    }
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop("<CDBAdapterMongoDB::removeFile");
+    #endif
+        
+    return 0;
 }
 
-/* Not used anymore? */
+/*
+ * Remove files with changed creation dates.
+ */
 int CDBAdapterMongoDB::removeFilesWithChangedCreationDate(const char *tablename,const char *file,const char *creationDate) {
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug("[Function: removeFilesWithChangedCreationDate]");
-  #endif
-  mongo::DBClientConnection * DB = getDataBaseConnection();
-  if(DB == NULL) {
-    return -1;
-  }
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop(">CDBAdapterMongoDB::removeFilesWithChangedCreationDate");
+    #endif
+        
+    mongo::DBClientConnection * DB = getDataBaseConnection();
+    if(DB == NULL) {
+        return -1;
+    }
   
-  mongo::BSONObjBuilder query;
-  query << "path" << file << "filedate" << mongo::NE << creationDate;
-  mongo::BSONObj objBSON = query.obj();
+    mongo::BSONObjBuilder query;
+    query << "path" << file << "filedate" << mongo::NE << creationDate;
+    mongo::BSONObj objBSON = query.obj();
   
-  std::string buff("database.");
-  buff.append(tablename);  
+    std::string buff("database.");
+    buff.append(tablename);  
   
-  DB->remove(buff,mongo::Query(objBSON)); 
-  if(DB->getPrevError().isEmpty()) {
-    throw(__LINE__);
-  }
-  return 0; 
+    //DB->remove(buff,mongo::Query(objBSON)); 
+    if(DB->getPrevError().isEmpty()) {
+        throw(__LINE__);
+    }
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop("<CDBAdapterMongoDB::removeFilesWithChangedCreationDate");
+    #endif
+        
+    return 0; 
 }
 
 int CDBAdapterMongoDB::setFileInt(const char *tablename,const char *file,int dimvalue,int dimindex,const char*filedate,GeoOptions *geoOptions) {
-  CT::string values;
-  values.print("('%s',%d,'%d','%s')",file,dimvalue,dimindex,filedate);
-  #ifdef CDBAdapterMongoDB_DEBUG
+    CT::string values;
+    values.print("('%s',%d,'%d','%s')",file,dimvalue,dimindex,filedate);
   
-  
-  
-    CDBDebug("Adding INT %s",values.c_str());
-  #endif
-  fileListPerTable[tablename].push_back(values.c_str());
-  return 0;
+    #ifdef CDBAdapterMongoDB_DEBUG
+        CDBDebug("Adding INT %s",values.c_str());
+    #endif
+        
+    fileListPerTable[tablename].push_back(values.c_str());
+    return 0;
 }
 
 int CDBAdapterMongoDB::setFileReal(const char *tablename,const char *file,double dimvalue,int dimindex,const char*filedate,GeoOptions *geoOptions) {
-  CT::string values;
-  values.print("('%s',%f,'%d','%s')",file,dimvalue,dimindex,filedate);
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug("Adding REAL %s",values.c_str());
-  #endif
-  fileListPerTable[tablename].push_back(values.c_str());
-  return 0;
+    CT::string values;
+    values.print("('%s',%f,'%d','%s')",file,dimvalue,dimindex,filedate);
+    #ifdef CDBAdapterMongoDB_DEBUG
+        CDBDebug("Adding REAL %s",values.c_str());
+    #endif
+        
+    fileListPerTable[tablename].push_back(values.c_str());
+    return 0;
 }
 
 int CDBAdapterMongoDB::setFileString(const char *tablename,const char *file,const char * dimvalue,int dimindex,const char*filedate,GeoOptions *geoOptions) {
-  CT::string values;
-  values.print("('%s','%s','%d','%s')",file,dimvalue,dimindex,filedate);
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug("Adding STRING %s",values.c_str());
-  #endif
-  fileListPerTable[tablename].push_back(values.c_str());
-  return 0;
+    CT::string values;
+    values.print("('%s','%s','%d','%s')",file,dimvalue,dimindex,filedate);
+  
+    #ifdef CDBAdapterMongoDB_DEBUG
+        CDBDebug("Adding STRING %s",values.c_str());
+    #endif
+    
+    fileListPerTable[tablename].push_back(values.c_str());
+    return 0;
 }
 
 int CDBAdapterMongoDB::setFileTimeStamp(const char *tablename,const char *file,const char *dimvalue,int dimindex,const char*filedate,GeoOptions *geoOptions) {
-  CT::string values;
-  values.print("('%s','%s','%d','%s')",file,dimvalue,dimindex,filedate);
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug(" Adding TIMESTAMP %s",values.c_str());
-  #endif
-  fileListPerTable[tablename].push_back(values.c_str());
-  return 0;
+    CT::string values;
+    values.print("('%s','%s','%d','%s')",file,dimvalue,dimindex,filedate);
+  
+    #ifdef CDBAdapterMongoDB_DEBUG
+        CDBDebug(" Adding TIMESTAMP %s",values.c_str());
+    #endif
+    
+    fileListPerTable[tablename].push_back(values.c_str());
+    return 0;
 }
 
-/* For next story! */
+/*
+ * Adding information about granules to the MongoDB database.
+ */
 int CDBAdapterMongoDB::addFilesToDataBase() {
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug("[Function: addFilesToDateBase]");
-    CDBDebug("Adding files to database");
-  #endif
-  mongo::DBClientConnection * DB = getDataBaseConnection();
-  if(DB == NULL) {
-    return -1;
-  }
-
-  std::string usedColumns;
-  for (std::map<std::string,std::vector<std::string> >::iterator it=fileListPerTable.begin(); it!=fileListPerTable.end(); ++it){
-	#ifdef CDBAdapterMongoDB_DEBUG
-      CDBDebug("Updating table %s with %d records",it->first.c_str(),(it->second.size()));
-    #endif
-    if(it->second.size()>0){
-      
-      for(size_t j=0;j<it->second.size();j++){
-        mongo::BSONObjBuilder insertQuery;
-	    // If table is known, use those columns.
-	    usedColumns = table_combi.find(it->first)->second;
-	    if(usedColumns.empty()) {
-	      // Otherwse use the third one.
-          usedColumns = table_combi.find("all_other")->second;
-	    }
-	    #ifdef CDBAdapterMongoDB_DEBUG
-          CDBDebug("used columns: %s",usedColumns.c_str());
-        #endif
-		std::string delimiter = ",";
-		
-		// Correctly format the values to insert
-		std::string valuesToInsert = it->second[j].c_str();
-		valuesToInsert.erase(0,2);
-		valuesToInsert.erase(valuesToInsert.size()-2);
-		
-		boost::erase_all(valuesToInsert, "'");
-		
-		for(size_t j=0; j<4;j++) {
-		  std::string cName = usedColumns.substr(0,usedColumns.find(delimiter));
-		  usedColumns.erase(0,usedColumns.find(delimiter) + 1);
-		  std::string cValue = valuesToInsert.substr(0,valuesToInsert.find(delimiter));
-		  valuesToInsert.erase(0,valuesToInsert.find(delimiter) + 1);
-		  
-		  if(strcmp(cName.c_str(),"time") || strcmp(cName.c_str(),"filedate")) {
-		    boost::replace_all(valuesToInsert, "T", " ");
-		    boost::erase_all(valuesToInsert, "Z");
-		  }
-		  insertQuery << cName << cValue;
-	    }
-		mongo::BSONObj insertQueryObj = insertQuery.obj();
-		std::string buff = "database.";
-		buff.append(it->first.c_str());
-        DB->insert(buff, insertQueryObj);
-      }
-      //int status =  dataBaseConnection->query(multiInsert.c_str()); 
-      //if(status!=0){
-        //CDBError("Query failed [%s]:",dataBaseConnection->getError());
-        //throw(__LINE__);
-      //}
-      //CDBDebug("/Inserting %d bytes",multiInsert.length());
-    }
-    it->second.clear();
     
-  }
-  #ifdef CDBAdapterMongoDB_DEBUG
-    CDBDebug("clearing arrays");
-  #endif
+    #ifdef MEASURETIME
+        StopWatch_Stop(">CDBAdapterMongoDB::addFilesToDataBase");
+    #endif
+        
+    /* First getting the database connection. */
+    mongo::DBClientConnection * DB = getDataBaseConnection();
+    if(DB == NULL) {
+        return -1;
+    }
+
+    for (std::map<std::string,std::vector<std::string> >::iterator  it=fileListPerTable.begin(); it!=fileListPerTable.end(); ++it){
+        if(it->second.size()>0) {
+      
+            /* Updating record with corresponding info. */
+            CT::string pathOfGranule = it->second[0].c_str();
+            CT::string dataSetNameString = pathOfGranule.splitToArray("/")[6].c_str();
+        
+            mongo::BSONObjBuilder selected;
+            selected << "fileName" << it->first.c_str() << "dataSetName" << dataSetNameString.c_str() << "dataSetVersion" << dataSetVersion;
+            mongo::BSONObj selectedGranule = selected.obj();
+            /* ---------------------------------------- */
+        
+            CT::string* arrayOfElementsToWrite;
+            mongo::BSONObjBuilder queryBuilder;
+            
+            /* This is the information of the whole granule. */
+            CT::string tmpCurrentGranule = it->second[0].c_str();
+            tmpCurrentGranule.substringSelf(1,tmpCurrentGranule.length()-1);
+            arrayOfElementsToWrite = tmpCurrentGranule.splitToArray(",");
+            
+            /* The path of the granule. */
+            CT::string path = *(arrayOfElementsToWrite);
+            path.substringSelf(1,path.length()-1);
+            
+            /* The file date of the granule. */
+            CT::string fileDate = *(arrayOfElementsToWrite + 3);
+            fileDate.substringSelf(1,fileDate.length()-2);
+            fileDate.replaceSelf("T", " ");
+            
+            CT::string usedDimensionToStore = "adaguc.";
+            usedDimensionToStore.concat(currentUsedDimension);
+                
+            /* And infally the dataset path. */
+            char* dataSetPath = (char*) path.c_str();
+            int position = strpos(dataSetPath, "/", 8);
+            CT::string dataSetPathString = path;
+            dataSetPathString.substringSelf(&dataSetPathString, 0, position);
+            dataSetPathString.concat("/");
+
+            mongo::BSONObjBuilder subQueryBuilder;
+            subQueryBuilder << "adaguc.path" << path.c_str() << "adaguc.dataSetPath" << dataSetPathString.c_str() << "adaguc.filedate" << fileDate.c_str();
+        
+            /* Getting all the time values. */
+            std::vector<std::string> builder;
+            for(size_t j=0;j<it->second.size();j++){
+                CT::string tmp = it->second[j].c_str();
+                
+                tmp.substringSelf(1,tmp.length()-1);
+                arrayOfElementsToWrite = tmp.splitToArray(","); 
+            
+                /* Getting the neccesary information. */
+                CT::string dimensionValue = *(arrayOfElementsToWrite + 1);
+                dimensionValue.substringSelf(1,dimensionValue.length()-2);
+                
+                dimensionValue.replaceSelf("T", " ");
+
+                if(std::find(builder.begin(), builder.end(), dimensionValue.c_str()) != builder.end()) {
+                    if(!conditionalSecondDimension.equals("")) {
+                        CT::string secondField = "adaguc.";
+                        secondField.concat(conditionalSecondDimension.c_str());
+                        std::vector<std::string> builderForSecondDimension;
+                        builderForSecondDimension.push_back(dimensionValue.c_str());
+
+                        subQueryBuilder << secondField.c_str() << builderForSecondDimension;
+                    }
+                } else {
+                    builder.push_back(dimensionValue.c_str());
+                }
+            }
+
+            subQueryBuilder << usedDimensionToStore.c_str() << builder;
+
+            queryBuilder << "$set" << subQueryBuilder.obj();
+            mongo::BSONObj objBSON = queryBuilder.obj();
+            
+            /* Update the right dataset. */
+            DB->update(dataGranulesTableMongoDB, mongo::Query(selectedGranule), objBSON);
+        }
+    
+    }
   
-  fileListPerTable.clear();
-  return 0;
+    fileListPerTable.clear();
+    
+    #ifdef MEASURETIME
+        StopWatch_Stop("<CDBAdapterMongoDB::addFilesToDataBase");
+    #endif
+    
+    return 0;
 }
 #endif

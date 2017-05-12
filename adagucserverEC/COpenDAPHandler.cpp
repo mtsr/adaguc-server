@@ -17,7 +17,7 @@ const char * COpenDAPHandler::className = "COpenDAPHandler";
 
 //wget --certificate /usr/people/plieger/impactspace/esg-dn1.nsc.liu.se.esgf-idp.openid.maartenplieger/certs/creds.pem --no-check-certificate https://bhw485.knmi.nl:8281/impactportal/DAP/esg-dn1.nsc.liu.se.esgf-idp.openid.maartenplieger/x4.nc.dods?x -O /tmp/dat.txt && hexdump -C /tmp/dat.txt
 
-//#define COPENDAPHANDLER_DEBUG
+// #define COPENDAPHANDLER_DEBUG
 class CDFTypeToOpenDAPType{
 public:
   static CT::string getvar(const int type){
@@ -339,11 +339,13 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path,const char *query,CSe
       }
     }
   }
+
   
   if(isDDSRequest == false && isDASRequest == false && isDODRequest == false){
     CDBError("Not a valid OpenDAP request received, e.g. use .dds, .das");
     return 1;
   }
+
   
   //Check if a dataset/dataURL was given
   CT::string dataURL = "";
@@ -360,26 +362,53 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path,const char *query,CSe
 //   CDBDebug("layerName: %s",layerName.c_str());
   
   if(dataURL.length()>0){
+    bool dataSetIsEnabled = false;
+    bool autoResourceIsEnabled = false;
+    if(srvParam->cfg->Dataset.size()==1){
+      if(srvParam->cfg->Dataset[0]->attr.enabled.equals("true")&&srvParam->cfg->Dataset[0]->attr.location.empty()==false){
+        dataSetIsEnabled = true;
+      }
+    }
+
+    if(srvParam->isAutoResourceEnabled()){
+      autoResourceIsEnabled = true;
+    }
     
+    bool autoResourceHasErrors = false;
+    bool autoResourceHasBeenFound = false;
+
+
     //Check if AUTORESOURCE is enabled
     if(srvParam->isAutoResourceEnabled()){
       srvParam->autoResourceLocation = dataURL;
       if(CAutoResource::configure(srvParam,true)!=0){
-        CDBError("AutoResource failed, file provided with SOURCE identifier not found");
+        if(dataSetIsEnabled == false){
+          CDBError("AutoResource failed, file provided with SOURCE identifier not found");
+          return 1;
+        } else {
+          autoResourceHasErrors = true;          
+        }
+      } else {
+        autoResourceHasBeenFound = true;
+      }
+    }
+
+
+    //Check if DATASET is enabled
+   if(dataSetIsEnabled && autoResourceHasBeenFound == false) {
+      srvParam->datasetLocation = dataURL;
+      if(CAutoResource::configure(srvParam,true)!=0){
+        if(autoResourceHasErrors == true){
+          resetErrors();
+          CDBError("File associated with either DATASET or SOURCE identifier not found");
+          return 1;
+        }
+        resetErrors();
+        CDBError("File associated with provided DATASET identifier not found");
         return 1;
       }
     }
-    //Check if DATASET is enabled
-    if(srvParam->cfg->Dataset.size()==1){
-      if(srvParam->cfg->Dataset[0]->attr.enabled.equals("true")&&srvParam->cfg->Dataset[0]->attr.location.empty()==false){
-        srvParam->datasetLocation = dataURL;
-        if(CAutoResource::configure(srvParam,true)!=0){
-          CDBError("File associated with provided DATASET identifier not found");
-          return 1;
-        }
-      }
-    }
-    
+
   }
   
   #ifdef COPENDAPHANDLER_DEBUG

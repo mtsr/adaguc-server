@@ -252,6 +252,7 @@ int main(int argc, const char *argv[]){
         setDebugFunction(serverDebugFunction);
         
         CT::string fileInfo = CGetFileInfo::getLayersForFile(file.c_str());
+        CDFObjectStore::getCDFObjectStore()->clear();
         if(inspireDatasetCSW.empty() == false){
           inspireDatasetCSW.encodeXMLSelf();
           CT::string inspireDatasetCSWXML;

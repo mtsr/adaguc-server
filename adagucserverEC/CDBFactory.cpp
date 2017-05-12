@@ -32,6 +32,7 @@ const char *CDBFactory::className="CDBFactory";
 CDBAdapter *CDBFactory::staticCDBAdapter = NULL;
 
 CDBAdapter *CDBFactory::getDBAdapter(CServerConfig::XMLE_Configuration *cfg){
+  CDBDebug("getDBAdapter");
   if(staticCDBAdapter == NULL){
     if(cfg->DataBase.size()!=1){
       CDBError("DataBase not properly configured");

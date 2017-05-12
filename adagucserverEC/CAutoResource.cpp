@@ -3,6 +3,12 @@
 #include "CServerError.h"
 #include "CDFObjectStore.h"
 
+#ifdef ADAGUC_USE_KDCMONGODB
+  #include "mongo/client/dbclient.h"
+  #include "mongo/bson/bson.h"
+  #include "CDBAdapterMongoDB.h"
+#endif
+
 const char *CAutoResource::className = "CAutoResource";
 
 int CAutoResource::configure(CServerParams *srvParam,bool plain){
@@ -40,23 +46,44 @@ int CAutoResource::configureDataset(CServerParams *srvParam,bool plain){
     internalDatasetLocation.replaceSelf(":","_");
     internalDatasetLocation.replaceSelf("/","_");
     
-    CT::string datasetConfigFile = srvParam->cfg->Dataset[0]->attr.location.c_str();
+    CT::string datasetConfigFile;
+    #ifndef ADAGUC_USE_KDCMONGODB
+      datasetConfigFile = srvParam->cfg->Dataset[0]->attr.location.c_str();
     
-    datasetConfigFile.printconcat("/%s.xml",internalDatasetLocation.c_str());
+      datasetConfigFile.printconcat("/%s.xml",internalDatasetLocation.c_str());
     
+      //Check whether this config file exists.
+      struct stat stFileInfo;
+      int intStat;
+      intStat = stat(datasetConfigFile.c_str(),&stFileInfo);
+      CT::string cacheBuffer;
+      //The file exists, so remove it.
+      if(intStat != 0) {
+        CDBDebug("Dataset config file does not exist: %s ",datasetConfigFile.c_str());
+        CDBError("No such dataset");
+        return 1;
+      }
+    #endif
+    #ifdef ADAGUC_USE_KDCMONGODB
+      int lastIndexOfUnderscore = internalDatasetLocation.lastIndexOf("_");
+    
+      CT::string tmp_datasetname = internalDatasetLocation;
+      CT::string tmp_datasetversion = internalDatasetLocation;
+    
+      tmp_datasetname.substringSelf(0, lastIndexOfUnderscore);
+      tmp_datasetversion.substringSelf(lastIndexOfUnderscore + 1, internalDatasetLocation.length());
+    
+      CDBAdapterMongoDB *mongoDB = new CDBAdapterMongoDB();
+      if (mongoDB == NULL) {
+        CDBError("Failed to initialize CDBAdapterMongoDB");
+        return 1;
+      }
+      datasetConfigFile = mongoDB->getAdagucConfig(tmp_datasetname.c_str(), tmp_datasetversion.c_str());
+      
+      delete mongoDB;
+    #endif
+
     CDBDebug("Found dataset %s",datasetConfigFile.c_str());
-    
-    //Check whether this config file exists.
-    struct stat stFileInfo;
-    int intStat;
-    intStat = stat(datasetConfigFile.c_str(),&stFileInfo);
-    CT::string cacheBuffer;
-    //The file exists, so remove it.
-    if(intStat != 0) {
-      CDBDebug("Dataset config file does not exist: %s ",datasetConfigFile.c_str());
-      CDBError("No such dataset");
-      return 1;
-    }
 
     //Add the dataset file to the current configuration      
     int status = srvParam->parseConfigFile(datasetConfigFile);

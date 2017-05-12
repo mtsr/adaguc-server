@@ -2174,7 +2174,13 @@ int CRequest::process_querystring(){
     CDBDebug("pszPATH %s = %s",key,getenv(key));
   }*/
   
-  
+
+  #ifdef ADAGUC_USE_KDCMONGODB
+    CDBAdapterMongoDB *mongoDB = new CDBAdapterMongoDB();
+    mongoDB->setConfig(srvParam->cfg);
+    delete mongoDB;
+  #endif
+
   /**
    * Check for OPENDAP
    */
@@ -2487,6 +2493,10 @@ int CRequest::process_querystring(){
             CT::string *hashList=values[1].splitToArray("#");
             srvParam->autoResourceLocation.copy(hashList[0].c_str());
             delete[] hashList;
+            if(srvParam->cfg->AutoResource.size()>0){
+              srvParam->cfg->AutoResource[0]->attr.enableautoopendap.copy("true");
+              srvParam->cfg->AutoResource[0]->attr.enablelocalfile.copy("true");
+            }
           }
           dFound_autoResourceLocation=1;
         }
@@ -2496,6 +2506,10 @@ int CRequest::process_querystring(){
         if(value0Cap.equals("DATASET")){
           if(srvParam->datasetLocation.empty()){
             srvParam->datasetLocation.copy(values[1].c_str());
+            if(srvParam->cfg->AutoResource.size()>0){
+              srvParam->cfg->AutoResource[0]->attr.enableautoopendap.copy("false");
+              srvParam->cfg->AutoResource[0]->attr.enablelocalfile.copy("false");
+            } 
           }
           dFound_Dataset=1;
         }
@@ -2812,8 +2826,16 @@ int CRequest::process_querystring(){
   
   if(dErrorOccured == 0){
     if(CAutoResource::configure(srvParam,false)!=0){
+      resetErrors();
       CDBError("AutoResource failed");
-      return 1;
+      if(srvParam->OGCVersion==WMS_VERSION_1_1_1) seterrormode(WMS_EXCEPTIONS_XML_1_1_1);
+      if(srvParam->OGCVersion==WMS_VERSION_1_3_0) seterrormode(WMS_EXCEPTIONS_XML_1_3_0);
+      if(srvParam->cfg->AutoResource[0]->attr.enablelocalfile.equals("false")) {
+        CDBError("Unknown dataset name or version");
+      } else {
+        CDBError("Unknown granule");
+      }
+      dErrorOccured=1;
     }
   }
   

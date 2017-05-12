@@ -8,7 +8,11 @@ CT::string CGetFileInfo::getLayersForFile(const char *filename){
   CDFObject * cdfObject =  CDFObjectStore::getCDFObjectStore()->getCDFObject(NULL,filename);
 
   CT::string fileInfo="";
-       
+
+  /* Getting the type of the granule. */
+  CT::string granuleExtension(filename);
+  granuleExtension.substringSelf(granuleExtension.lastIndexOf("."),granuleExtension.length());
+
   try{
     if(cdfObject == NULL){
       CDBError("Unable to open file %s",filename);
@@ -68,9 +72,9 @@ CT::string CGetFileInfo::getLayersForFile(const char *filename){
       }*/
       
       fileInfo+="  <Layer type=\"database\">\n";
-      fileInfo.printconcat("    <FilePath filter=\".*\\.nc$\">%s</FilePath>\n","[DATASETPATH]");
+      fileInfo.printconcat("    <FilePath filter=\".*\\%s$\">%s</FilePath>\n",granuleExtension.encodeXML().c_str(),"[DATASETPATH]");
       fileInfo.printconcat("    <Name>%s</Name>\n",name.encodeXML().c_str());
-      fileInfo.printconcat("    <Title>%s</Title>\n",title.encodeXML().c_str());
+      fileInfo.printconcat("    <Title>%s (%s)</Title>\n",title.encodeXML().c_str(), var->name.c_str());
       fileInfo.printconcat("    <Variable>%s</Variable>\n",variableList[j].encodeXML().c_str());
       //fileInfo.printconcat("    <MetadataURL>[METADATAURL]</MetadataURL>\n");
       fileInfo.printconcat("    <Abstract>%s</Abstract>\n",abstract.encodeXML().c_str());
@@ -87,8 +91,6 @@ CT::string CGetFileInfo::getLayersForFile(const char *filename){
     fileInfo = "";
   }
   
-  
-  CDFObjectStore::getCDFObjectStore()->clear();
   
   return fileInfo; 
 }
