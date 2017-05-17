@@ -18,7 +18,7 @@ const char *COpenDAPHandler::className = "COpenDAPHandler";
 
 //wget --certificate /usr/people/plieger/impactspace/esg-dn1.nsc.liu.se.esgf-idp.openid.maartenplieger/certs/creds.pem --no-check-certificate https://bhw485.knmi.nl:8281/impactportal/DAP/esg-dn1.nsc.liu.se.esgf-idp.openid.maartenplieger/x4.nc.dods?x -O /tmp/dat.txt && hexdump -C /tmp/dat.txt
 
-// #define COPENDAPHANDLER_DEBUG
+//#define COPENDAPHANDLER_DEBUG
 class CDFTypeToOpenDAPType{
 public:
     static CT::string getvar(const int type){
@@ -401,27 +401,8 @@ int COpenDAPHandler::performAutoResource(RequestInfo requestInfo, CServerParams 
     return 0;
 }
 
+int COpenDAPHandler::initializeLayer(CDataSource *dataSource, RequestInfo& requestInfo, CServerParams *srvParam) {
 
-int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, CServerParams *srvParam){
-
-    #ifdef COPENDAPHANDLER_DEBUG
-    CDBDebug("\n*****************************************************************************************");
-    #endif
-
-    CDBDebug("OpenDAP Received [%s] [%s]", path, query);
-
-    RequestInfo requestInfo = obtainRequestInfoFromPath(path);
-    if(requestInfo.isDDSRequest == false && requestInfo.isDASRequest == false && requestInfo.isDODRequest == false){
-        CDBError("Not a valid OpenDAP request received, e.g. use .dds, .das");
-        return 1;
-    }
-
-    if (performAutoResource(requestInfo, srvParam) != 0) {
-        CDBError("Errors occured during autoconfiguring.");
-        return 1;
-    }
-
-    CDataSource *dataSource = new CDataSource();
     bool foundLayer = false;
 
     for(size_t layerNo = 0; layerNo < srvParam->cfg->Layer.size(); layerNo ++){
@@ -454,14 +435,45 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, C
         return 1;
     }
 
+    #ifdef COPENDAPHANDLER_DEBUG
+    CDBDebug("Found layer %s",requestInfo.layerName.c_str());
+    #endif
+
+    return 0;
+}
+
+
+int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, CServerParams *srvParam){
+
+    #ifdef COPENDAPHANDLER_DEBUG
+    CDBDebug("\n*****************************************************************************************");
+    #endif
+
+    CDBDebug("OpenDAP Received [%s] [%s]", path, query);
+
+    RequestInfo requestInfo = obtainRequestInfoFromPath(path);
+    if(requestInfo.isDDSRequest == false && requestInfo.isDASRequest == false && requestInfo.isDODRequest == false){
+        CDBError("Not a valid OpenDAP request received, e.g. use .dds, .das");
+        return 1;
+    }
+
+    if (performAutoResource(requestInfo, srvParam) != 0) {
+        CDBError("Errors occured during autoconfiguring.");
+        return 1;
+    }
+
+    CDataSource *dataSource = new CDataSource();
+    if (initializeLayer(dataSource, requestInfo, srvParam) != 0) {
+        CDBError("Errors occured during layer initialisation.");
+        return 1;
+    }
+
     if(requestInfo.isDODRequest){
         printf("%s%c%c\n", "Content-Type: application/octet-stream", 13, 10);
     } else{
         printf("%s%c%c\n", "Content-Type: text/plain", 13, 10);
     }
-#ifdef COPENDAPHANDLER_DEBUG
-    CDBDebug("Found layer %s",requestInfo.layerName.c_str());
-#endif
+
     if(dataSource->dLayerType == CConfigReaderLayerTypeDataBase ||
        dataSource->dLayerType == CConfigReaderLayerTypeStyled){
         //When this layer has no dimensions, we do not need to query
