@@ -65,6 +65,7 @@ private:
     static int getDimSize(CDataSource *dataSource, const char *name);
     /* Obtain information concerning the request from the path, like the type of the request or the name of the layer.*/
     static RequestInfo obtainRequestInfoFromPath(const char *path);
+    static int performAutoResource(RequestInfo requestInfo, CServerParams *srvParam);
 
 public:
     DEF_ERRORFUNCTION();

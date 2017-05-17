@@ -344,45 +344,23 @@ COpenDAPHandler::RequestInfo COpenDAPHandler::obtainRequestInfoFromPath(const ch
         requestInfo.layerName = requestInfo.layerName.substring(lastSlash + 1, - 1);
     }
 
-    return requestInfo;
-}
-
-int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, CServerParams *srvParam){
-
-    #ifdef COPENDAPHANDLER_DEBUG
-    CDBDebug("\n*****************************************************************************************");
-    #endif
-
-    CDBDebug("OpenDAP Received [%s] [%s]", path, query);
-
-    RequestInfo requestInfo = obtainRequestInfoFromPath(path);
-    if(requestInfo.isDDSRequest == false && requestInfo.isDASRequest == false && requestInfo.isDODRequest == false){
-        CDBError("Not a valid OpenDAP request received, e.g. use .dds, .das");
-        return 1;
-    }
-
     #ifdef COPENDAPHANDLER_DEBUG
     CDBDebug("dataURL: %s",requestInfo.dataURL.c_str());
     CDBDebug("layerName: %s",requestInfo.layerName.c_str());
     #endif
 
+    return requestInfo;
+}
+
+int COpenDAPHandler::performAutoResource(RequestInfo requestInfo, CServerParams *srvParam) {
     if(requestInfo.dataURL.length() > 0){
         bool dataSetIsEnabled = false;
-        bool autoResourceIsEnabled = false;
         if(srvParam->cfg->Dataset.size() == 1){
             if(srvParam->cfg->Dataset[0]->attr.enabled.equals("true") &&
                srvParam->cfg->Dataset[0]->attr.location.empty() == false){
                 dataSetIsEnabled = true;
             }
         }
-
-        if(srvParam->isAutoResourceEnabled()){
-            autoResourceIsEnabled = true;
-        }
-
-        bool autoResourceHasErrors = false;
-        bool autoResourceHasBeenFound = false;
-
 
         //Check if AUTORESOURCE is enabled
         if(srvParam->isAutoResourceEnabled()){
@@ -391,19 +369,18 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, C
                 if(dataSetIsEnabled == false){
                     CDBError("AutoResource failed, file provided with SOURCE identifier not found");
                     return 1;
-                } else{
-                    autoResourceHasErrors = true;
                 }
             } else{
-                autoResourceHasBeenFound = true;
+                // Autoresource was succesfull, we can return.
+                return 0;
             }
         }
 
         //Check if DATASET is enabled
-        if(dataSetIsEnabled && autoResourceHasBeenFound == false){
+        if(dataSetIsEnabled){
             srvParam->datasetLocation = requestInfo.dataURL;
             if(CAutoResource::configure(srvParam, true) != 0){
-                if(autoResourceHasErrors == true){
+                if(srvParam->isAutoResourceEnabled()){
                     resetErrors();
                     CDBError("File associated with either DATASET or SOURCE identifier not found");
                     return 1;
@@ -420,6 +397,29 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, C
     CDBDebug("pathQuery = %s",requestInfo.pathQuery.c_str());
     CDBDebug("autoResourceVariable = %s",srvParam->autoResourceVariable.c_str());
     #endif
+
+    return 0;
+}
+
+
+int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, CServerParams *srvParam){
+
+    #ifdef COPENDAPHANDLER_DEBUG
+    CDBDebug("\n*****************************************************************************************");
+    #endif
+
+    CDBDebug("OpenDAP Received [%s] [%s]", path, query);
+
+    RequestInfo requestInfo = obtainRequestInfoFromPath(path);
+    if(requestInfo.isDDSRequest == false && requestInfo.isDASRequest == false && requestInfo.isDODRequest == false){
+        CDBError("Not a valid OpenDAP request received, e.g. use .dds, .das");
+        return 1;
+    }
+
+    if (performAutoResource(requestInfo, srvParam) != 0) {
+        CDBError("Errors occured during autoconfiguring.");
+        return 1;
+    }
 
     CDataSource *dataSource = new CDataSource();
     bool foundLayer = false;
