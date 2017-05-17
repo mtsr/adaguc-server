@@ -332,13 +332,6 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, C
                 layerName = dapName.substring(0, i);
                 pathQuery = dapName.substring(i + 5, - 1);
                 isDODRequest = true;
-            } else{
-                int i = dapName.lastIndexOf(".dds");
-                if(i != - 1){
-                    layerName = dapName.substring(0, i);
-                    pathQuery = dapName.substring(i + 5, - 1);
-                    isDDSRequest = true;
-                }
             }
         }
     }
