@@ -296,19 +296,20 @@ int COpenDAPHandler::putVariableData(CDF::Variable *v, CDFType type){
     return 0;
 }
 
-int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, CServerParams *srvParam){
+COpenDAPHandler::RequestInfo::RequestInfo() {
+    this->layerName = "";
+    this->pathQuery = "";
+    this->dataURL = "";
+    this->isDDSRequest = false;
+    this->isDASRequest = false;
+    this->isDODRequest = false;
+}
 
-    #ifdef COPENDAPHANDLER_DEBUG
-    CDBDebug("\n*****************************************************************************************");
+COpenDAPHandler::RequestInfo COpenDAPHandler::obtainRequestInfoFromPath(const char *path) {
 
-    #endif
-    CDBDebug("OpenDAP Received [%s] [%s]", path, query);
+    RequestInfo requestInfo;
+
     CT::string dapName = path + 8;
-    CT::string layerName = "";
-    CT::string pathQuery = "";
-    bool isDDSRequest = false;
-    bool isDASRequest = false;
-    bool isDODRequest = false;
     dapName.decodeURLSelf();
 
     #ifdef COPENDAPHANDLER_DEBUG
@@ -317,46 +318,55 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, C
 
     int i = dapName.lastIndexOf(".dds");
     if(i != - 1){
-        layerName = dapName.substring(0, i);
-        pathQuery = dapName.substring(i + 4, - 1);
-        isDDSRequest = true;
+        requestInfo.layerName = dapName.substring(0, i);
+        requestInfo.pathQuery = dapName.substring(i + 4, - 1);
+        requestInfo.isDDSRequest = true;
     } else{
         int i = dapName.lastIndexOf(".das");
         if(i != - 1){
-            layerName = dapName.substring(0, i);
-            pathQuery = dapName.substring(i + 4, - 1);
-            isDASRequest = true;
+            requestInfo.layerName = dapName.substring(0, i);
+            requestInfo.pathQuery = dapName.substring(i + 4, - 1);
+            requestInfo.isDASRequest = true;
         } else{
             int i = dapName.lastIndexOf(".dods");
             if(i != - 1){
-                layerName = dapName.substring(0, i);
-                pathQuery = dapName.substring(i + 5, - 1);
-                isDODRequest = true;
+                requestInfo.layerName = dapName.substring(0, i);
+                requestInfo.pathQuery = dapName.substring(i + 5, - 1);
+                requestInfo.isDODRequest = true;
             }
         }
     }
 
+    //Check if a dataset/dataURL was given
+    int lastSlash = requestInfo.layerName.lastIndexOf("/");
+    if(lastSlash != - 1){
+        requestInfo.dataURL = requestInfo.layerName.substring(0, lastSlash);
+        requestInfo.layerName = requestInfo.layerName.substring(lastSlash + 1, - 1);
+    }
 
-    if(isDDSRequest == false && isDASRequest == false && isDODRequest == false){
+    return requestInfo;
+}
+
+int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, CServerParams *srvParam){
+
+    #ifdef COPENDAPHANDLER_DEBUG
+    CDBDebug("\n*****************************************************************************************");
+    #endif
+
+    CDBDebug("OpenDAP Received [%s] [%s]", path, query);
+
+    RequestInfo requestInfo = obtainRequestInfoFromPath(path);
+    if(requestInfo.isDDSRequest == false && requestInfo.isDASRequest == false && requestInfo.isDODRequest == false){
         CDBError("Not a valid OpenDAP request received, e.g. use .dds, .das");
         return 1;
     }
 
-
-    //Check if a dataset/dataURL was given
-    CT::string dataURL = "";
-    int lastSlash = layerName.lastIndexOf("/");
-    if(lastSlash != - 1){
-        dataURL = layerName.substring(0, lastSlash);
-        layerName = layerName.substring(lastSlash + 1, - 1);
-    }
-
     #ifdef COPENDAPHANDLER_DEBUG
-    CDBDebug("dataURL: %s",dataURL.c_str());
-    CDBDebug("layerName: %s",layerName.c_str());
+    CDBDebug("dataURL: %s",requestInfo.dataURL.c_str());
+    CDBDebug("layerName: %s",requestInfo.layerName.c_str());
     #endif
 
-    if(dataURL.length() > 0){
+    if(requestInfo.dataURL.length() > 0){
         bool dataSetIsEnabled = false;
         bool autoResourceIsEnabled = false;
         if(srvParam->cfg->Dataset.size() == 1){
@@ -376,7 +386,7 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, C
 
         //Check if AUTORESOURCE is enabled
         if(srvParam->isAutoResourceEnabled()){
-            srvParam->autoResourceLocation = dataURL;
+            srvParam->autoResourceLocation = requestInfo.dataURL;
             if(CAutoResource::configure(srvParam, true) != 0){
                 if(dataSetIsEnabled == false){
                     CDBError("AutoResource failed, file provided with SOURCE identifier not found");
@@ -391,7 +401,7 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, C
 
         //Check if DATASET is enabled
         if(dataSetIsEnabled && autoResourceHasBeenFound == false){
-            srvParam->datasetLocation = dataURL;
+            srvParam->datasetLocation = requestInfo.dataURL;
             if(CAutoResource::configure(srvParam, true) != 0){
                 if(autoResourceHasErrors == true){
                     resetErrors();
@@ -406,11 +416,11 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, C
     }
 
     #ifdef COPENDAPHANDLER_DEBUG
-    CDBDebug("Layername = %s",layerName.c_str());
-    CDBDebug("pathQuery = %s",pathQuery.c_str());
+    CDBDebug("Layername = %s",requestInfo.layerName.c_str());
+    CDBDebug("pathQuery = %s",requestInfo.pathQuery.c_str());
     CDBDebug("autoResourceVariable = %s",srvParam->autoResourceVariable.c_str());
-
     #endif
+
     CDataSource *dataSource = new CDataSource();
     bool foundLayer = false;
 
@@ -419,13 +429,13 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, C
             CT::string intLayerName;
 
             srvParam->makeUniqueLayerName(&intLayerName, srvParam->cfg->Layer[layerNo]);
-            if(layerName.length() == 0){
-                layerName = intLayerName;
+            if(requestInfo.layerName.length() == 0){
+                requestInfo.layerName = intLayerName;
             }
             intLayerName.replaceSelf("/", "_");
             CDBDebug("%s", intLayerName.c_str());
 
-            if(intLayerName.equals(layerName.c_str())){
+            if(intLayerName.equals(requestInfo.layerName.c_str())){
                 if(dataSource->setCFGLayer(srvParam, srvParam->configObj->Configuration[0],
                                            srvParam->cfg->Layer[layerNo], intLayerName.c_str(), 0) != 0){
                     CDBError("Error setCFGLayer");
@@ -439,18 +449,18 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, C
     }
 
     if(foundLayer == false){
-        CDBError("Unable to find layer %s", layerName.c_str());
+        CDBError("Unable to find layer %s", requestInfo.layerName.c_str());
         delete dataSource;
         return 1;
     }
 
-    if(isDODRequest){
+    if(requestInfo.isDODRequest){
         printf("%s%c%c\n", "Content-Type: application/octet-stream", 13, 10);
     } else{
         printf("%s%c%c\n", "Content-Type: text/plain", 13, 10);
     }
 #ifdef COPENDAPHANDLER_DEBUG
-    CDBDebug("Found layer %s",layerName.c_str());
+    CDBDebug("Found layer %s",requestInfo.layerName.c_str());
 #endif
     if(dataSource->dLayerType == CConfigReaderLayerTypeDataBase ||
        dataSource->dLayerType == CConfigReaderLayerTypeStyled){
@@ -525,7 +535,7 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, C
             #endif
         }
 
-        if(isDDSRequest || isDODRequest){
+        if(requestInfo.isDDSRequest || requestInfo.isDODRequest){
 
 
             std::vector<VarInfo> selectedVariables;
@@ -648,12 +658,12 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, C
             CDBDebug("]");
             #endif
 
-            CT::string output = createDDSHeader(layerName, cdfObject, selectedVariables);
+            CT::string output = createDDSHeader(requestInfo.layerName, cdfObject, selectedVariables);
             printf("%s\r\n", output.c_str());
 
             CDFObject *cdfObjectToRead = NULL;
             //Data request
-            if(isDODRequest){
+            if(requestInfo.isDODRequest){
 
                 printf("Data:\r\n");
                 for(size_t i = 0; i < selectedVariables.size(); i ++){
@@ -888,7 +898,7 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, C
             }
         }
 
-        if(isDASRequest){
+        if(requestInfo.isDASRequest){
             CDFObject *cdfObject = CDFObjectStore::getCDFObjectStore()->getCDFObjectHeaderPlain(dataSource->srvParams,
                                                                                                 dataSource->getFileName());
             CT::string output = "";
