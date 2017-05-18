@@ -49,12 +49,12 @@ def read_remote_data(address='', dataset_name='', reference_time=-1, yell=True):
 	url = get_url(address=address, dataset_name=dataset_name)
 	start = timer()
 	remote_data = netCDF4.Dataset(url)
-	time_tooken = timer() - start
+	time_taken = timer() - start
 
 	if yell:
-		print('Done. Took {0} s (as opposed of {1} s as reference)'.format(round(time_tooken, 4), reference_time))
+		print('Done. Took {0} s (as opposed of {1} s as reference)'.format(round(time_taken, 4), reference_time))
 
-	return time_tooken, remote_data
+	return time_taken, remote_data
 
 
 def fetch_and_test_performance(wms_address='', dataset_name='', reference_time=-1, ratio_warn=0.95, ratio_error=0.9):
@@ -159,31 +159,32 @@ def download_missing_files(which_files, wms_address):
 				shutil.copyfileobj(r, f)
 		print('Done')
 
-WMS_ADDRESS = '145.23.218.149'
-download, which_files = check_files_present()
-if download:
-	download_missing_files(which_files=which_files, wms_address=WMS_ADDRESS)
-# ---- Dataset with many small files ---- #
-LOCAL_FILE_NAME = 'INTER_OPER_R___RD1NRT__L3__20170409T080000_20170410T080000_0001.nc'
-DATASET_NAME='Many%20small%20files_1'
-REF_TIME = 1.2 # second
+if __name__ == '__main__':
+	WMS_ADDRESS = '145.23.218.149'
+	download, which_files = check_files_present()
+	if download:
+		download_missing_files(which_files=which_files, wms_address=WMS_ADDRESS)
+	# ---- Dataset with many small files ---- #
+	LOCAL_FILE_NAME = 'INTER_OPER_R___RD1NRT__L3__20170409T080000_20170410T080000_0001.nc'
+	DATASET_NAME='Many%20small%20files_1'
+	REF_TIME = 1.2 # second
 
-test_ncdump_opendap_header(local_file_name=LOCAL_FILE_NAME, wms_address=WMS_ADDRESS, dataset_name=DATASET_NAME)
-test_opendap(local_file_name=LOCAL_FILE_NAME, wms_address=WMS_ADDRESS, dataset_name=DATASET_NAME, reference_time=REF_TIME)
+	test_ncdump_opendap_header(local_file_name=LOCAL_FILE_NAME, wms_address=WMS_ADDRESS, dataset_name=DATASET_NAME)
+	test_opendap(local_file_name=LOCAL_FILE_NAME, wms_address=WMS_ADDRESS, dataset_name=DATASET_NAME, reference_time=REF_TIME)
 
-# ---- Dataset with many large files ---- #
-# LOCAL_FILE_NAME = 'ESACCI-OZONE-L4-NP-MERGED-KNMI-20081220-fv0003.nc'
-# DATASET_NAME='Many%20large%20files_1'
-# REF_TIME = 1.5 # second
-# test_ncdump_opendap_header(local_file_name=LOCAL_FILE_NAME, wms_address=WMS_ADDRESS, dataset_name=DATASET_NAME)
-# test_opendap(local_file_name=LOCAL_FILE_NAME, wms_address=WMS_ADDRESS, dataset_name=DATASET_NAME, reference_time=REF_TIME)
+	# ---- Dataset with many large files ---- #
+	# LOCAL_FILE_NAME = 'ESACCI-OZONE-L4-NP-MERGED-KNMI-20081220-fv0003.nc'
+	# DATASET_NAME='Many%20large%20files_1'
+	# REF_TIME = 1.5 # second
+	# test_ncdump_opendap_header(local_file_name=LOCAL_FILE_NAME, wms_address=WMS_ADDRESS, dataset_name=DATASET_NAME)
+	# test_opendap(local_file_name=LOCAL_FILE_NAME, wms_address=WMS_ADDRESS, dataset_name=DATASET_NAME, reference_time=REF_TIME)
 
-# ---- Dataset with few huge files ---- #
-# DATASET_NAME='Dataset%20with%20very%20large%20files_2'
-# LOCAL_FILE_NAME = 'SEVIR_OPER_R___MSGCPP__L2__20170401T000000_20170402T000000_0002.nc'
-# REF_TIME = 1 # second
+	# ---- Dataset with few huge files ---- #
+	# DATASET_NAME='Dataset%20with%20very%20large%20files_2'
+	# LOCAL_FILE_NAME = 'SEVIR_OPER_R___MSGCPP__L2__20170401T000000_20170402T000000_0002.nc'
+	# REF_TIME = 1 # second
 
-# test_ncdump_opendap_header(local_file_name=LOCAL_FILE_NAME, wms_address=WMS_ADDRESS, dataset_name=DATASET_NAME)
-# test_opendap(local_file_name=LOCAL_FILE_NAME, wms_address=WMS_ADDRESS, dataset_name=DATASET_NAME, reference_time=REF_TIME)
+	# test_ncdump_opendap_header(local_file_name=LOCAL_FILE_NAME, wms_address=WMS_ADDRESS, dataset_name=DATASET_NAME)
+	# test_opendap(local_file_name=LOCAL_FILE_NAME, wms_address=WMS_ADDRESS, dataset_name=DATASET_NAME, reference_time=REF_TIME)
 
-print('DONE! All clear.')
+	print('DONE! All clear.')
