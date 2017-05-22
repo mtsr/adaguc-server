@@ -63,15 +63,17 @@ int CDFNetCDFReader::_readVariableData(CDF::Variable *var, CDFType type){
 }
 
 int CDFNetCDFReader::_readVariableData(CDF::Variable *var, CDFType type,size_t *start,size_t *count,ptrdiff_t *stride){
-  int nDims,nVars,nRootAttributes,unlimDimIdP;    
-  
-  if(cdfCache!=NULL){
-    #ifdef CCDFNETCDFIO_DEBUG_OPEN        
-    CDBDebug("Looking into cache %s of type %s",var->name.c_str(),CDF::getCDFDataTypeName(type).c_str());
-    #endif
-    int cacheStatus = cdfCache->readVariableData(var, type,start,count,stride,false);
-    if(cacheStatus == 0) {return 0;}
-  }
+  int nDims,nVars,nRootAttributes,unlimDimIdP;
+
+  // TODO: Make dependent on config file.
+  // if(cdfCache!=NULL){
+  //   #ifdef CCDFNETCDFIO_DEBUG_OPEN
+  //   CDBDebug("Looking into cache %s of type %s",var->name.c_str(),CDF::getCDFDataTypeName(type).c_str());
+  //   #endif
+  //   int cacheStatus = cdfCache->readVariableData(var, type,start,count,stride,false);
+  //   if(cacheStatus == 0) {return 0;}
+  // }
+
   
   if(root_id==-1){
     #ifdef CCDFNETCDFIO_DEBUG_OPEN        
@@ -216,12 +218,13 @@ int CDFNetCDFReader::_readVariableData(CDF::Variable *var, CDFType type,size_t *
       ncError(__LINE__,className,"nc_get_var: ",status);
       return 1;
     }
-    
-    if(cdfCache!=NULL){
-      CDBDebug("Putting into cache %s",var->name.c_str());
-      int cacheStatus = cdfCache->readVariableData(var, type,start,count,stride,true);
-      if(cacheStatus == 0) return 0;
-    }  
+
+    // TODO: Make dependent on config file.
+    // if(cdfCache!=NULL){
+    //   CDBDebug("Putting into cache %s",var->name.c_str());
+    //   int cacheStatus = cdfCache->readVariableData(var, type,start,count,stride,true);
+    //   if(cacheStatus == 0) return 0;
+    // }
     return 0;
   }
   
@@ -344,14 +347,15 @@ int CDFNetCDFReader::_readVariableData(CDF::Variable *var, CDFType type,size_t *
   
   
   //warper.warpLonData(var);
-  
-  if(cdfCache!=NULL){
-    #ifdef CCDFNETCDFIO_DEBUG        
-    CDBDebug("Putting into cache %s",var->name.c_str());
-    #endif
-    int cacheStatus = cdfCache->readVariableData(var, type,start,count,stride,true);
-    if(cacheStatus == 0) return 0;
-  }  
+
+  // TODO: Make dependent on config file.
+  // if(cdfCache!=NULL){
+  //   #ifdef CCDFNETCDFIO_DEBUG
+  //   CDBDebug("Putting into cache %s",var->name.c_str());
+  //   #endif
+  //   int cacheStatus = cdfCache->readVariableData(var, type,start,count,stride,true);
+  //   if(cacheStatus == 0) return 0;
+  // }
   
   #ifdef CCDFNETCDFIO_DEBUG        
   CDBDebug("Ready.");
@@ -827,11 +831,12 @@ CT::string CDFNetCDFWriter::getNCCommands(){
   return NCCommands;
 };
 
-int CDFNetCDFWriter::write(const char *fileName){
-  return write(fileName,NULL);
+
+int CDFNetCDFWriter::write(const char *fileName, bool writeDimVarsFirst){
+  return write(fileName,NULL, writeDimVarsFirst);
 }
 
-int CDFNetCDFWriter::write(const char *fileName,void(*progress)(const char*message,float percentage)){
+int CDFNetCDFWriter::write(const char *fileName,void(*progress)(const char*message,float percentage), bool writeDimVarsFirst){
   NCCommands="";
   if(listNCCommands){
     NCCommands.printconcat("int root_id;\n");
@@ -874,7 +879,7 @@ int CDFNetCDFWriter::write(const char *fileName,void(*progress)(const char*messa
     return 1;
     
   }
-  status = _write(progress);
+  status = _write(progress, writeDimVarsFirst);
   #ifdef CCDFNETCDFWRITER_DEBUG                        
   CDBDebug("Finished writing to file %s",fileName);
   #endif  
@@ -889,7 +894,7 @@ int CDFNetCDFWriter::write(const char *fileName,void(*progress)(const char*messa
   return status;
 };
 
-int CDFNetCDFWriter::_write(void(*progress)(const char*message,float percentage)){
+int CDFNetCDFWriter::_write(void(*progress)(const char*message,float percentage), bool writeDimVarsFirst){
   #ifdef CCDFNETCDFWRITER_DEBUG                        
   CDBDebug("Writing global attributes");
   #endif  
@@ -986,12 +991,13 @@ int CDFNetCDFWriter::_write(void(*progress)(const char*message,float percentage)
   }
   
   
-  int nrVarsWritten=0;
   //Write the variables
-  //First write the variables connected to dimensions and later the variables itself
-  //writeDimsFirst==0: dimension variables
-  //writeDimsFirst==1: variables
-  for(int writeDimsFirst=0;writeDimsFirst<2;writeDimsFirst++){
+  //If writeDimVarsFirst equals true, we write the variables connected to dimensions in the first iteration
+  //and the other variables in a second iteration.
+  //If writeDimsVarsFirst equals false, we keep the original ordering of the variables.
+  int nrOfIterations = (writeDimVarsFirst ? 2 : 1);
+  int nrVarsWritten=0;
+  for(int iterationNr=0;iterationNr<nrOfIterations;iterationNr++){
     #ifdef CCDFNETCDFWRITER_DEBUG                        
     if(writeDimsFirst==0)CDBDebug("Write dimensions");
     if(writeDimsFirst==1)CDBDebug("Write variables");
@@ -1015,9 +1021,10 @@ int CDFNetCDFWriter::_write(void(*progress)(const char*message,float percentage)
       #endif  
       
       int numDims=variable->dimensionlinks.size();
-      if((variable->isDimension==true &&writeDimsFirst==0)||
-        (variable->isDimension==false&&writeDimsFirst==1)){
-        {
+      // Check if we need to consider the order in which the variables should be written.
+      if(!writeDimVarsFirst ||                                    // The order is not important.
+              (variable->isDimension==true &&iterationNr==0) ||   // The order is important, dimension variables should be written in the first iteration.
+              (variable->isDimension==false&&iterationNr==1)) {   // The order is important, non-dimension variables should be written in the second iteration.
           int dimIDS[numDims+1];
           int NCCommandID[numDims+1];
           size_t totalVariableSize = 0;
@@ -1245,7 +1252,6 @@ int CDFNetCDFWriter::_write(void(*progress)(const char*message,float percentage)
           }
           
           nrVarsWritten++;
-        }
         }
     }
   }

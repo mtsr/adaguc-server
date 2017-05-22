@@ -205,7 +205,11 @@ int CDFCache::open(const char *fileName,CDFObject *cdfObject,bool readOrWrite){
       CDFNetCDFWriter *writer = new CDFNetCDFWriter(cdfObject);
       writer->setNetCDFMode(4);
       writer->disableVariableWrite();
-      writer->write(cacheFilename.c_str());
+
+      // We shouldn't reorder the dimension variables when we only use the header in the cache.
+      // TODO: Make dependent on config file.
+      bool writeDimVarsFirst = false;
+      writer->write(cacheFilename.c_str(), writeDimVarsFirst);
       delete writer;
       cache->releaseCacheFile();
     }
