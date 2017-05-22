@@ -1234,16 +1234,12 @@ CDBStore::Store *CDBAdapterMongoDB::getFilesAndIndicesForDimensions(CDataSource 
     labels.append(dataSource->requiredDims[0]->netCDFDimName.c_str());
 
     CDBStore::Store *store = ptrToStore(ptrToMongo, labels.c_str(), dimIndex, isAggregation);
-  
-    if(store != NULL) {
-        return store;
-    }
     
     #ifdef MEASURETIME
         StopWatch_Stop("<CDBAdapterMongoDB::getFilesAndIndicesForDimensions");
     #endif
         
-    return NULL;
+    return store;
 }
 
 /*
