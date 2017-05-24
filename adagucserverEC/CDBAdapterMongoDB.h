@@ -172,6 +172,14 @@ class CDBAdapterMongoDB:public CDBAdapter{
     int              createDimTableTimeStamp(const char *dimname,const char *tablename);
     
     /*
+     * Lookup for the full path of one granule of a certain dataset.
+     * It's a replacement for a full directory search OPeNDAP uses to get one header out of one file.
+     * @param   const char*     The name of the dataset
+     * @param   const char*     The version of the dataset
+     */
+    static const char* firstGranuleLookup(const char* datasetName, const char* datasetVersion);
+
+    /*
      *  Checking if the correct data is available in the database.datagranules database. 
      * 
      *  @param      const char*     Filename of the granule.
