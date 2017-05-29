@@ -1243,9 +1243,119 @@ CDBStore::Store *CDBAdapterMongoDB::getFilesAndIndicesForDimensions(CDataSource 
 }
 
 /*
+ * Create a CDBSstore based on a subset of the result of the mongo query, bounded by the start, count and stride.
+ *
+ * Assumes that the mongo result is of the following BSON structure:
+ * "adaguc": {
+ *      "field1": "field_value1",
+ *      "fieldx": "field_valuex",
+ *      "dimension1:" [
+ *          "dimension_value1.1",
+ *          "dimension_value1.2",
+ *          "dimension_value1.x"
+ *      ]
+ * }
+ *
+ * The dimension arrays are split over several records, which each contain all the fields, the dimension value and the dimension index.
+ * For example, the mongo result above provides the following records:
+ * field_value1, fieldvaluex, dimension_value1.1, 0
+ * field_value1, fieldvaluex, dimension_value1.2, 1
+ * field_value1, fieldvaluex, dimension_value1.x, 2
+ * 
+ * TODO: http://bvljira.knmi.nl/browse/KDCSP-175 - Also loop over and include other dimensions in the result. Currently we only use the first one (time).
+ * For the current OPeNDAP implementation this is not a problem, since time is the only variable which we can aggregate over multiple files.
+ * TODO: In the current implementation the stride is not used yet. This is a generic issue for all database adapters.
+ *
+ * @param   fields      All the fields which should be added to store records
+ * @param   dimensions  All the dimensions over which we should loop and which should be added to the store
+ * @param   ptrToMongo  The query result, should consist of all available granules for a dataset.
+ * @param   start       The start index for each dimension
+ * @param   count       The amount of required results for each dimension
+ * @param   stride      The stride for each dimension
+ * @return    CDBStore::Store   The result in Store form.
+ */
+CDBStore::Store *splitDimensionsToStoreRecords(std::vector<std::string> fields,std::vector<std::string> dimensions,std::auto_ptr<mongo::DBClientCursor> ptrToMongo,size_t *start,size_t *count,ptrdiff_t *stride) {
+
+    // Initialize the column model. We need to add twice the dimension size because we will be adding both the dimension value and index.
+    CDBStore::ColumnModel *colModel = new CDBStore::ColumnModel(fields.size() + 2*dimensions.size());
+    CDBStore::Store *store=new CDBStore::Store(colModel);
+
+    int indexFirstDim = 0;
+    bool finished = false;
+
+    // Loop over all the granules.
+    while (ptrToMongo->more() && !finished) {
+        mongo::BSONObj granuleObj = ptrToMongo->next();
+
+        #ifdef CDBAdapterMongoDB_DEBUG
+        CDBDebug("GranuleObj = %s", granuleObj.toString().c_str());
+        CDBDebug("indexFirstDim = %d", indexFirstDim);
+        CDBDebug("dimensions[0] = %s", dimensions[0].c_str());
+        #endif
+
+        // Check if all indices in this granule are still lower than the start index.
+        // TODO: Also include other dimensions in this check.
+        std::vector<mongo::BSONElement> firstDimension = granuleObj.getObjectField("adaguc").getField(dimensions[0]).Array();
+        if (indexFirstDim + firstDimension.size() < start[0]) {
+            indexFirstDim = indexFirstDim + firstDimension.size();
+            #ifdef CDBAdapterMongoDB_DEBUG
+            CDBDebug("Skipped this granule.");
+            #endif
+            continue;
+        }
+
+        // The aggregation starts in this file, loop over all the dimension steps.
+        for (int i = 0; i < firstDimension.size(); i++){
+
+            // If we are not yet at the start position, continue.
+            // TODO: Also include other dimensions in this check
+            if (indexFirstDim < start[0]) {
+                indexFirstDim++;
+                #ifdef CDBAdapterMongoDB_DEBUG
+                CDBDebug("Skipped dimension step %d.", indexFirstDim);
+                #endif
+                continue;
+            }
+
+            // If we are past the number of required steps, we can stop.
+            // TODO: Also include other dimensions in this check.
+            if (indexFirstDim >= count[0] + start[0]) {
+                finished = true;
+                #ifdef CDBAdapterMongoDB_DEBUG
+                CDBDebug("Finished processing the granules at dimension step %d.", indexFirstDim);
+                #endif
+                break;
+            }
+
+            // We need to process this dimension step.
+            CDBStore::Record *record = new CDBStore::Record(colModel);
+
+            // Push all the necessary fields to the store.
+            int store_index = 0;
+            for (int field_index = 0; field_index < fields.size(); field_index++) {
+                std::string fieldValue = granuleObj.getObjectField("adaguc").getStringField(fields[field_index]);
+                record->push(store_index,fieldValue.c_str());
+                store_index++;
+            }
+
+            // Get dimension value and required dimension index and push them to the store.
+            // TODO: Also loop over other required dimensions.
+            record->push(store_index,firstDimension[i].str().c_str());
+            record->push(store_index+1,numberToString(i).c_str());
+            store->push(record);
+
+            indexFirstDim++;
+        }
+    }
+
+    return store;
+}
+
+/*
  * Retrieves file path, dimension value and dimension index for all required dimensions.
+ * TODO: In the current implemenation we always use the first required dimension. Please see the issues KDCSP-173, KDCSP-174, KDCSP-175.
+ * For the current OPeNDAP implementation this is not a problem, since time is the only variable which we can aggregate over multiple files.
  * TODO: In the current implementation the stride and the limit are not used yet. This is a generic issue for all database adapters.
- * TODO: In the current implemenation we always assume there is only one required dimension. Please see the issues KDCSP-173, KDCSP-174, KDCSP-175
  *
  * @return    CDBStore::Store   The result in Store form.
  */
@@ -1285,7 +1395,8 @@ CDBStore::Store *CDBAdapterMongoDB::getFilesForIndices(CDataSource *dataSource,s
 
         // Add all the desired dimensions to the seleciton.
         std::string requiredDimensionField = "adaguc.";
-        requiredDimensionField.append(dataSource->requiredDims[i]->netCDFDimName.c_str());
+        std::string requiredDimensionName = dataSource->requiredDims[i]->netCDFDimName.c_str();
+        requiredDimensionField.append(requiredDimensionName);
         desiredFieldsBuilder << requiredDimensionField.c_str() << 1;
 
         // Add all the required dimensions to the sort order.
@@ -1294,9 +1405,8 @@ CDBStore::Store *CDBAdapterMongoDB::getFilesForIndices(CDataSource *dataSource,s
 
     mongo::BSONObj desiredFieldsObjBSON = desiredFieldsBuilder.obj();
 
-
     // -------------------------------------------------------------------------------------
-    // Select the granules and loop over them to build the CDBStore.
+    // Select the granules and build the CDBStore.
     // -------------------------------------------------------------------------------------
     std::auto_ptr<mongo::DBClientCursor> ptrToMongo = DB->query(dataGranulesTableMongoDB, mongo::Query(queryObjBSON).sort(sortOrderBuilder.obj()) , 0, 0, &desiredFieldsObjBSON);
 
@@ -1304,74 +1414,18 @@ CDBStore::Store *CDBAdapterMongoDB::getFilesForIndices(CDataSource *dataSource,s
     CDBDebug("Start[0] = %d, count[0] = %d, stride[0] = %d", start[0], count[0], stride[0]);
     #endif
 
-    CDBStore::ColumnModel *colModel = new CDBStore::ColumnModel(3); // TODO: Update for more required dimensions ( 1 + size requireddimension*2)
-    CDBStore::Store *store=new CDBStore::Store(colModel);
-
-    int indexFirstDim = 0;
-    bool finished = false;
-
-    while (ptrToMongo->more() && !finished) {
-        mongo::BSONObj granuleObj = ptrToMongo->next();
-        CDBDebug("GranuleObj = %s", granuleObj.toString().c_str());
-
-        #ifdef CDBAdapterMongoDB_DEBUG
-        CDBDebug("OccurancesFirstRequiredDim = %d", indexFirstDim);
-        #endif
-
-
-        // Check if we are already at the place to start.
-        std::vector<mongo::BSONElement> firstRequiredDim = granuleObj.getObjectField("adaguc").getField("time").Array(); // TODO: Update for more requirede dimensions (not hardcoded time)
-        if (indexFirstDim + firstRequiredDim.size() < start[0]) {
-            indexFirstDim = indexFirstDim + firstRequiredDim.size();
-            continue;
-            #ifdef CDBAdapterMongoDB_DEBUG
-            CDBDebug("Skipped this granule.");
-            #endif
-        }
-
-        // The aggregation starts in this file, loop over all the dimension steps.
-        for (int i = 0; i < firstRequiredDim.size(); i++){
-
-            // If we are not yet at the start position, continue.
-            if (indexFirstDim < start[0]) {
-                indexFirstDim++;
-                #ifdef CDBAdapterMongoDB_DEBUG
-                CDBDebug("Skipped dimension step %d.", indexFirstDim);
-                #endif
-                continue;
-            }
-
-            // If we are past the number of required steps, we can stop.
-            if (indexFirstDim > count[0] + start[0]) {
-                finished = true;
-                #ifdef CDBAdapterMongoDB_DEBUG
-                CDBDebug("Finished processing the granules at dimension step %d.", indexFirstDim);
-                #endif
-                break;
-            }
-
-            // We need to process this dimension step.
-            // TODO: Also loop over other required dimensions.
-            CDBStore::Record *record = new CDBStore::Record(colModel);
-
-            // Get the path, required dimension value and required dimension index and push them to the store..
-            std::string pathValue = granuleObj.getObjectField("adaguc").getStringField("path");
-            std::string dimensionValue = firstRequiredDim[i].str();
-            std::string dimensionIndex = numberToString(i);
-
-            // TODO: Also push the other required dimsensions.
-            record->push(0,pathValue.c_str());
-            record->push(1,dimensionValue.c_str());
-            record->push(2,dimensionIndex.c_str());
-            store->push(record);
-
-            #ifdef CDBAdapterMongoDB_DEBUG
-            CDBDebug("Pushed a record with path = %s, dimvalue = %s, dimindex = %s.", pathValue.c_str(), dimensionValue.c_str(), dimensionIndex.c_str());
-            #endif
-
-            indexFirstDim++;
-        }
+    // Create a vector of all the dimensions names which should be used to create the store.
+    std::vector<std::string> dimensions;
+    for(size_t i=0;i<dataSource->requiredDims.size();i++){
+        dimensions.push_back(dataSource->requiredDims[i]->netCDFDimName.c_str());
     }
+
+    // Create a vector of all the fields which should be added to the store.
+    std::vector<std::string> fields;
+    fields.push_back("path");
+
+    // Create a store which contains a subset of the result based on the start, count and stride and where the dimension arrays are flattened into separate records.
+    CDBStore::Store *store = splitDimensionsToStoreRecords(fields,dimensions, ptrToMongo, start, count, stride);
 
     #ifdef MEASURETIME
     StopWatch_Stop("<CDBAdapterMongoDB::getFilesForIndices");
