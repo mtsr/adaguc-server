@@ -45,9 +45,9 @@ private:
   CT::string cacheDir;
   /* 
    * Options are:
-   * - False
-   * - Header
-   * - All
+   * - none
+   * - header
+   * - all
    */
   CT::string howToUseCache;
   
