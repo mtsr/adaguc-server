@@ -36,7 +36,7 @@ int CAutoResource::configureDataset(CServerParams *srvParam,bool plain){
       return 1;
     }
     
-    if(CServerParams::checkForValidTokens(srvParam->datasetLocation.c_str(),"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_-:/.")==false){
+    if(CServerParams::checkForValidTokens(srvParam->datasetLocation.c_str(),"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_-:/. ")==false){
       CDBError("Invalid dataset name. ");
       return 1;
     }
