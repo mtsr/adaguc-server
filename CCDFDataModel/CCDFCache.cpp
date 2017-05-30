@@ -46,6 +46,21 @@ CCache * CDFCache::getCCache(const char * directory, const char *fileName){
 }
 
 
+int CDFCache::setHowToUseCache(const char* cacheUsage) {
+  if (!cacheUsage) {
+    return 0;
+  }
+  #ifdef CCDFCACHE_DEBUG
+    CDBDebug("Cache is being used for: %s", cacheUsage);
+  #endif
+  
+  howToUseCache = cacheUsage;
+  return 1;
+}
+
+CT::string CDFCache::getHowToUseCache() {
+  return howToUseCache;
+}
 
 int CDFCache::readBinaryData(const char * filename,void **data, CDFType type, size_t &varSize){
 #ifdef CCDFCACHE_DEBUG_LOW
@@ -209,7 +224,10 @@ int CDFCache::open(const char *fileName,CDFObject *cdfObject,bool readOrWrite){
       // We shouldn't reorder the dimension variables when we only use the header in the cache.
       // TODO: Make dependent on config file.
       bool writeDimVarsFirst = false;
+      (howToUseCache.equals("header") ? writeDimVarsFirst = false : writeDimVarsFirst = true);
+
       writer->write(cacheFilename.c_str(), writeDimVarsFirst);
+
       delete writer;
       cache->releaseCacheFile();
     }

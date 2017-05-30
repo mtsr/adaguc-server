@@ -264,6 +264,10 @@ CDFObject *CDFObjectStore::getCDFObject(CDataSource *dataSource,CServerParams *s
     if(cacheDir.length()>0){
       if(srvParams->isAutoResourceCacheEnabled()){
         cdfCache = new CDFCache(cacheDir);
+
+        const char* cacheUsage = srvParams->cfg->AutoResource[0]->attr.enablecache.c_str();
+        cdfCache->setHowToUseCache(cacheUsage);
+
         cdfReader->cdfCache = cdfCache;
       }
     }

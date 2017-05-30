@@ -43,6 +43,13 @@ class CDFCache{
 private:
   CCache* cache;
   CT::string cacheDir;
+  /* 
+   * Options are:
+   * - False
+   * - Header
+   * - All
+   */
+  CT::string howToUseCache;
   
   CCache* getCCache(const char * directory, const char *fileName);
   
@@ -57,8 +64,23 @@ public:
   CDFCache(CT::string cacheDir){
     //CDBDebug("DIRECTORY %s",cacheDir.c_str());
     this->cacheDir = cacheDir;
+    this->howToUseCache = NULL;
     cache = NULL;
   }
+
+  /*
+   * Set how the cache must be used.
+   * @return
+   * 0 for not succeeded
+   * 1 for succeeded
+   */
+  int setHowToUseCache(const char* cacheUsage);
+
+  /*
+   * Get how the cache is being used.
+   */
+  CT::string getHowToUseCache();
+
   ~CDFCache(){
     delete cache;
   }

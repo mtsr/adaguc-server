@@ -65,14 +65,15 @@ int CDFNetCDFReader::_readVariableData(CDF::Variable *var, CDFType type){
 int CDFNetCDFReader::_readVariableData(CDF::Variable *var, CDFType type,size_t *start,size_t *count,ptrdiff_t *stride){
   int nDims,nVars,nRootAttributes,unlimDimIdP;
 
-  // TODO: Make dependent on config file.
-  // if(cdfCache!=NULL){
-  //   #ifdef CCDFNETCDFIO_DEBUG_OPEN
-  //   CDBDebug("Looking into cache %s of type %s",var->name.c_str(),CDF::getCDFDataTypeName(type).c_str());
-  //   #endif
-  //   int cacheStatus = cdfCache->readVariableData(var, type,start,count,stride,false);
-  //   if(cacheStatus == 0) {return 0;}
-  // }
+  CT::string howTheCacheMustBeUsed = cdfCache->getHowToUseCache();
+
+  if(cdfCache!=NULL && !howTheCacheMustBeUsed.equals("header")){
+    #ifdef CCDFNETCDFIO_DEBUG_OPEN
+      CDBDebug("Looking into cache %s of type %s",var->name.c_str(),CDF::getCDFDataTypeName(type).c_str());
+    #endif
+    int cacheStatus = cdfCache->readVariableData(var, type,start,count,stride,false);
+    if(cacheStatus == 0) {return 0;}
+  }
 
   
   if(root_id==-1){
@@ -219,12 +220,11 @@ int CDFNetCDFReader::_readVariableData(CDF::Variable *var, CDFType type,size_t *
       return 1;
     }
 
-    // TODO: Make dependent on config file.
-    // if(cdfCache!=NULL){
-    //   CDBDebug("Putting into cache %s",var->name.c_str());
-    //   int cacheStatus = cdfCache->readVariableData(var, type,start,count,stride,true);
-    //   if(cacheStatus == 0) return 0;
-    // }
+    if(cdfCache!=NULL && !howTheCacheMustBeUsed.equals("header")){
+      CDBDebug("Putting into cache %s",var->name.c_str());
+      int cacheStatus = cdfCache->readVariableData(var, type,start,count,stride,true);
+      if(cacheStatus == 0) return 0;
+    }
     return 0;
   }
   
@@ -348,14 +348,13 @@ int CDFNetCDFReader::_readVariableData(CDF::Variable *var, CDFType type,size_t *
   
   //warper.warpLonData(var);
 
-  // TODO: Make dependent on config file.
-  // if(cdfCache!=NULL){
-  //   #ifdef CCDFNETCDFIO_DEBUG
-  //   CDBDebug("Putting into cache %s",var->name.c_str());
-  //   #endif
-  //   int cacheStatus = cdfCache->readVariableData(var, type,start,count,stride,true);
-  //   if(cacheStatus == 0) return 0;
-  // }
+  if(cdfCache!=NULL && !howTheCacheMustBeUsed.equals("header")){
+    #ifdef CCDFNETCDFIO_DEBUG
+    CDBDebug("Putting into cache %s",var->name.c_str());
+    #endif
+    int cacheStatus = cdfCache->readVariableData(var, type,start,count,stride,true);
+    if(cacheStatus == 0) return 0;
+  }
   
   #ifdef CCDFNETCDFIO_DEBUG        
   CDBDebug("Ready.");

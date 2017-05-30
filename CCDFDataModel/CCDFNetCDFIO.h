@@ -42,7 +42,7 @@
 
 class CDFNetCDFReader :public CDFReader{
   private:
-  static void ncError(int line, const char *className, const char * msg,int e);  
+  static void ncError(int line, const char *className, const char * msg,int e);
     
   //CCDFWarper warper;
   static CDFType _typeConversionVar(nc_type type,bool isUnsigned);
