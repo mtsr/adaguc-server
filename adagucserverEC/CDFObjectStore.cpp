@@ -196,7 +196,6 @@ CDFObject *CDFObjectStore::getCDFObject(CDataSource *dataSource,const char *file
 
 CDFObject *CDFObjectStore::getCDFObject(CDataSource *dataSource,CServerParams *srvParams,const char *fileName,bool plain){
   CT::string uniqueIDForFile = fileName;
-  
 
   for(size_t j=0;j<fileNames.size();j++){
     if(fileNames[j]->equals(uniqueIDForFile.c_str())){
@@ -206,100 +205,25 @@ CDFObject *CDFObjectStore::getCDFObject(CDataSource *dataSource,CServerParams *s
       return cdfObjects[j];
     }
   }
+
   if(cdfObjects.size()>MAX_OPEN_FILES){
     deleteCDFObject(&cdfObjects[0]);
   }
-  #ifdef CDFOBJECTSTORE_DEBUG              
-  CDBDebug("Creating CDFObject with id %s",uniqueIDForFile.c_str());
-  #endif      
- 
-  
-  //Open the object.
-  #ifdef CDFOBJECTSTORE_DEBUG           
+
+  //Open the object and header.
+  #ifdef CDFOBJECTSTORE_DEBUG
   CDBDebug("Opening %s",fileName);
+  CDBDebug("Creating CDFObject with id %s",uniqueIDForFile.c_str());
   #endif
-  
-  //Open header
-  
-  
+  CDFObject *cdfObject = openCDFObjectHeader(dataSource, srvParams, fileName);
 
-  
-  
-
-  
-  const char *fileLocationToOpen = fileName;
- 
-  if(EXTRACT_HDF_NC_VERBOSE){
-    CDBDebug("Opening from file: %s",fileLocationToOpen );
-  }
-  
-  
-  
-   //CDFObject not found: Create one
-  CDFObject *cdfObject = new CDFObject();
-  CDFReader *cdfReader = NULL;
-  
-  if(dataSource!=NULL){
-    cdfReader = CDFObjectStore::getCDFReader(dataSource,fileLocationToOpen);
-  }else{
-    //Get a reader based on file extension
-    cdfReader = CDFObjectStore::getCDFReader(fileLocationToOpen);
-  }
-  
-  if(cdfReader==NULL){
-    if(dataSource!=NULL){
-      CDBError("Unable to get a reader for source %s",dataSource->cfgLayer->Name[0]->value.c_str());
-    }
-    throw(1);
-  }
-  
- 
-  CDFCache* cdfCache = NULL;
-
-  if(srvParams!=NULL){
- 
-    
-    CT::string cacheDir = srvParams->cfg->TempDir[0]->attr.value.c_str();
-    //srvParams->getCacheDirectory(&cacheDir);
-    if(cacheDir.length()>0){
-      if(srvParams->isAutoResourceCacheEnabled()){
-        cdfCache = new CDFCache(cacheDir);
-
-        const char* cacheUsage = srvParams->cfg->AutoResource[0]->attr.enablecache.c_str();
-        cdfCache->setHowToUseCache(cacheUsage);
-
-        cdfReader->cdfCache = cdfCache;
-      }
-    }
-
-  }
-  
-  
-  cdfObject->attachCDFReader(cdfReader);
-  
-  int status = cdfObject->open(fileLocationToOpen);
-   //CDBDebug("opened");
-  if(status!=0){
-    //TODO in case of basic/digest authentication, username and password is currently also listed....
-    CDBError("Unable to open file '%s'",fileLocationToOpen);
-    delete cdfObject;
-    delete cdfReader;
-    delete cdfCache;
-    return NULL;
-  }
-  
- 
-  
-  
-   
-  //CDBDebug("PUSHING %s",uniqueIDForFile.c_str());
   //Push everything into the store
+  #ifdef CDFOBJECTSTORE_DEBUG
+  CDBDebug("PUSHING %s",uniqueIDForFile.c_str());
+  #endif
   fileNames.push_back(new CT::string(uniqueIDForFile.c_str()));
   cdfObjects.push_back(cdfObject);
-  cdfReaders.push_back(cdfReader);
-  
-  
-
+  cdfReaders.push_back((CDFReader *) cdfObject->getCDFReader());
   
   if(plain == false){
     bool level2CompatMode = false;
@@ -326,6 +250,65 @@ CDFObject *CDFObjectStore::getCDFObject(CDataSource *dataSource,CServerParams *s
   
   return cdfObject;
 }
+
+CDFObject *CDFObjectStore::openCDFObjectHeader(CDataSource *dataSource,CServerParams *srvParams,const char *fileName) {
+
+  if(EXTRACT_HDF_NC_VERBOSE){
+    CDBDebug("Opening from file: %s",fileName );
+  }
+
+  CDFObject *cdfObject = new CDFObject();
+  CDFReader *cdfReader = NULL;
+
+  if(dataSource!=NULL){
+    cdfReader = CDFObjectStore::getCDFReader(dataSource,fileName);
+  }else{
+    //Get a reader based on file extension
+    cdfReader = CDFObjectStore::getCDFReader(fileName);
+  }
+
+  if(cdfReader==NULL){
+    if(dataSource!=NULL){
+      CDBError("Unable to get a reader for source %s",dataSource->cfgLayer->Name[0]->value.c_str());
+    }
+    throw(1);
+  }
+
+  CDFCache* cdfCache = NULL;
+
+  if(srvParams!=NULL){
+    CT::string cacheDir = srvParams->cfg->TempDir[0]->attr.value.c_str();
+    if(cacheDir.length()>0){
+      if(srvParams->isAutoResourceCacheEnabled()){
+        cdfCache = new CDFCache(cacheDir);
+
+        const char* cacheUsage = srvParams->cfg->AutoResource[0]->attr.enablecache.c_str();
+        cdfCache->setHowToUseCache(cacheUsage);
+
+        cdfReader->cdfCache = cdfCache;
+      }
+    }
+  }
+
+  cdfObject->attachCDFReader(cdfReader);
+
+  int status = cdfObject->open(fileName);
+  //CDBDebug("opened");
+  if(status!=0){
+    //TODO in case of basic/digest authentication, username and password is currently also listed....
+    CDBError("Unable to open file '%s'",fileName);
+    delete cdfObject;
+    delete cdfReader;
+    delete cdfCache;
+    return NULL;
+  }
+
+  return cdfObject;
+}
+
+
+
+
 CDFObjectStore *CDFObjectStore::getCDFObjectStore(){return &cdfObjectStore;};
 
 

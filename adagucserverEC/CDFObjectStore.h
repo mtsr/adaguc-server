@@ -83,6 +83,7 @@ public:
   CDFObject *getCDFObjectHeader(CServerParams *srvParams,const char *fileName);
   CDFObject *getCDFObjectHeaderPlain(CServerParams *srvParams,const char *fileName);
   static CT::StackList<CT::string> getListOfVisualizableVariables(CDFObject *cdfObject);
+  static CDFObject *openCDFObjectHeader(CDataSource *dataSource,CServerParams *srvParams,const char *fileName);
   
   /**
    * Returns how many objects are openend in this store

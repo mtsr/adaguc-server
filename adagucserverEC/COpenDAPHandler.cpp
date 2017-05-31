@@ -145,6 +145,10 @@ CT::string COpenDAPHandler::createDDSHeader(CT::string layerName, CDFObject *cdf
             CDF::Variable *v = cdfObject->variables[j];
             CDFType type = (CDFType) v->getType();
 
+            if (v->name.equals("time")) {
+                type = CDF_DOUBLE;
+            }
+
             if(selectedVariables[i].name.equals(&v->name)){
                 output.printconcat("    %s ", CDFTypeToOpenDAPType::getvar(type).c_str());
                 output.concat(v->name.c_str());
@@ -509,8 +513,8 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, C
     //Read the NetCDF header!
     try{
 
-        CDFObject *cdfObject = CDFObjectStore::getCDFObjectStore()->getCDFObjectHeaderPlain(dataSource->srvParams,
-                                                                                            dataSource->getFileName());;// dataSource->getDataObject(0)->cdfObject;
+        CDFObject *cdfObject = CDFObjectStore::openCDFObjectHeader(NULL, dataSource->srvParams, dataSource->getFileName());
+
         for(size_t d = 0; d < dataSource->cfgLayer->Dimension.size(); d ++){
             //Check for the configured dimensions or scalar variables
             //1 )Is this a scalar?
@@ -759,11 +763,8 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, C
                                             //If variable name equals dimension name, values are stored in the database.
                                             CTime time;
                                             if(v->isDimension){
-                                                if(type == CDF_DOUBLE){
                                                     if(v->dimensionlinks.size() == 1){
                                                         if(v->name.equals(v->dimensionlinks[0]->name)){
-
-
                                                             if(dimStandardName.equals("time")){
                                                                 if(dimUnits.length() > 2){
                                                                     readFromDB = true;
@@ -781,9 +782,6 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, C
                                                     } else{
                                                         CDBDebug("%s size is not 1", v->name.c_str());
                                                     }
-                                                } else{
-                                                    CDBDebug("%s is not of type DOUBLE", v->name.c_str());
-                                                }
                                             } else{
                                                 #ifdef COPENDAPHANDLER_DEBUG
                                                 CDBDebug("%s is not a dim",v->name.c_str());
@@ -794,7 +792,6 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, C
 
                                                 if(readFromDB){
                                                     CT::string dimValue = store->getRecord(storeIndex)->get(1);
-
 
                                                     #ifdef COPENDAPHANDLER_DEBUG
                                                     CDBDebug("Dimension value from DB = [%s] units = [%s] standard_name = [%s]",dimValue.c_str(),dimUnits.c_str(),dimStandardName.c_str());
@@ -819,7 +816,6 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, C
                                                     for(size_t j=0;j< v->dimensionlinks.size();j++){
                                                       CDBDebug("  start[%d] = %d %d %d",j,start[j],count[j],stride[j]);
                                                     }
-
                                                     #endif
                                                     CDF::Variable *variableToRead = cdfObjectToRead->getVariable(
                                                             v->name.c_str());
@@ -827,7 +823,6 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, C
                                                     #ifdef COPENDAPHANDLER_DEBUG
                                                     CDBDebug("Read %d elements with type %s with element size %d",variableToRead->getSize(),CDF::getCDFDataTypeName(type).c_str(), CDF::getTypeSize(type));
                                                     #endif
-
 
                                                     putVariableData(variableToRead, type);
                                                 }
