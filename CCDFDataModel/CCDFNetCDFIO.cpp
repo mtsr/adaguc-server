@@ -995,11 +995,6 @@ int CDFNetCDFWriter::_write(void(*progress)(const char*message,float percentage)
   int nrOfIterations = (writeDimVarsFirst ? 2 : 1);
   int nrVarsWritten=0;
   for(int iterationNr=0;iterationNr<nrOfIterations;iterationNr++){
-    #ifdef CCDFNETCDFWRITER_DEBUG                        
-    if(writeDimsFirst==0)CDBDebug("Write dimensions");
-    if(writeDimsFirst==1)CDBDebug("Write variables");
-    #endif  
-    
     
     //Write all different variables.
     //nc_close(root_id);
@@ -1013,9 +1008,6 @@ int CDFNetCDFWriter::_write(void(*progress)(const char*message,float percentage)
       //Get the variable names with these dimensions 
       CDF::Variable *variable = cdfObject->variables[j];
       const char *name = variable->name.c_str();
-      #ifdef CCDFNETCDFWRITER_DEBUG                        
-      if(writeDimsFirst==0)CDBDebug("Writing %s",name);
-      #endif  
       
       int numDims=variable->dimensionlinks.size();
       // Check if we need to consider the order in which the variables should be written.
