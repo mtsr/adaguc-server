@@ -89,7 +89,8 @@ public:
    * This method does NOT add the object to the store,
    * for this the getCDFObject, getCDFObjectHeader or getCDFObjectHeaderPlain methods should be used.
    */
-  static CDFObject *openCDFObjectHeader(CDataSource *dataSource,CServerParams *srvParams,const char *fileName);
+  static CDFObject *openCDFObjectHeaderWithoutStore(CDataSource *dataSource, CServerParams *srvParams,
+                                                    const char *fileName);
   
   /**
    * Returns how many objects are openend in this store

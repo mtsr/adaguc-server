@@ -215,7 +215,7 @@ CDFObject *CDFObjectStore::getCDFObject(CDataSource *dataSource,CServerParams *s
   CDBDebug("Opening %s",fileName);
   CDBDebug("Creating CDFObject with id %s",uniqueIDForFile.c_str());
   #endif
-  CDFObject *cdfObject = openCDFObjectHeader(dataSource, srvParams, fileName);
+  CDFObject *cdfObject = openCDFObjectHeaderWithoutStore(dataSource, srvParams, fileName);
 
   //Push everything into the store
   #ifdef CDFOBJECTSTORE_DEBUG
@@ -251,7 +251,8 @@ CDFObject *CDFObjectStore::getCDFObject(CDataSource *dataSource,CServerParams *s
   return cdfObject;
 }
 
-CDFObject *CDFObjectStore::openCDFObjectHeader(CDataSource *dataSource,CServerParams *srvParams,const char *fileName) {
+CDFObject *CDFObjectStore::openCDFObjectHeaderWithoutStore(CDataSource *dataSource, CServerParams *srvParams,
+                                                           const char *fileName) {
 
   if(EXTRACT_HDF_NC_VERBOSE){
     CDBDebug("Opening from file: %s",fileName );

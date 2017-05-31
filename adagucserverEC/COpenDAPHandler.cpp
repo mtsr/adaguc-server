@@ -513,7 +513,8 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, C
     try{
 
         // Open the NetCDF header. We do not store this object in the store, to ensure that it won't be deleted when the store is full.
-        CDFObject *cdfObject = CDFObjectStore::openCDFObjectHeader(NULL, dataSource->srvParams, dataSource->getFileName());
+        CDFObject *cdfObject = CDFObjectStore::openCDFObjectHeaderWithoutStore(NULL, dataSource->srvParams,
+                                                                               dataSource->getFileName());
 
         for(size_t d = 0; d < dataSource->cfgLayer->Dimension.size(); d ++){
             //Check for the configured dimensions or scalar variables
