@@ -83,6 +83,12 @@ public:
   CDFObject *getCDFObjectHeader(CServerParams *srvParams,const char *fileName);
   CDFObject *getCDFObjectHeaderPlain(CServerParams *srvParams,const char *fileName);
   static CT::StackList<CT::string> getListOfVisualizableVariables(CDFObject *cdfObject);
+
+  /*
+   * Open a CDFObject and its header.
+   * This method does NOT add the object to the store,
+   * for this the getCDFObject, getCDFObjectHeader or getCDFObjectHeaderPlain methods should be used.
+   */
   static CDFObject *openCDFObjectHeader(CDataSource *dataSource,CServerParams *srvParams,const char *fileName);
   
   /**
