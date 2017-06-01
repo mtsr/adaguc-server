@@ -1309,18 +1309,18 @@ CDBStore::Store *splitDimensionsToStoreRecords(std::vector<std::string> fields,s
             continue;
         }
 
-        // The aggregation starts in this file, loop over all the dimension steps.
-        for (int i = 0; i < firstDimension.size(); i++){
+        // The aggregation is part of in this file.
+        // For the first granule, we might need to skip a few steps.
+        int indexGranuleDimension = 0;
+        if (indexFirstDim < start[0]) {
+              #ifdef CDBAdapterMongoDB_DEBUG
+              CDBDebug("Skipped dimension steps %d untill %d.", indexFirstDim, start[0]);
+              #endif
+              indexGranuleDimension = start[0] - indexFirstDim;
+              indexFirstDim = start[0];
+        }
 
-            // If we are not yet at the start position, continue.
-            // TODO: Also include other dimensions in this check
-            if (indexFirstDim < start[0]) {
-                indexFirstDim++;
-                #ifdef CDBAdapterMongoDB_DEBUG
-                CDBDebug("Skipped dimension step %d.", indexFirstDim);
-                #endif
-                continue;
-            }
+        for (int i = indexGranuleDimension; i < firstDimension.size(); i++){
 
             // If we are past the number of required steps, we can stop.
             // TODO: Also include other dimensions in this check.
