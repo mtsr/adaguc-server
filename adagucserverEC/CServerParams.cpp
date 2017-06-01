@@ -281,7 +281,12 @@ bool CServerParams::isAutoResourceCacheEnabled(){
   if(autoResourceCacheEnabled==-1){
      autoResourceCacheEnabled = 0;
     if(cfg->AutoResource.size()>0){
-      if(!cfg->AutoResource[0]->attr.enablecache.equals("none"))autoResourceCacheEnabled = 1;
+      if (cfg->AutoResource[0]->attr.enablecache.equals("header")) {
+        autoResourceCacheEnabled = 1;
+      }
+      if (cfg->AutoResource[0]->attr.enablecache.equals("all")) {
+        autoResourceCacheEnabled = 1;
+      }
     }
   }
   if(autoResourceCacheEnabled==1)return true;
