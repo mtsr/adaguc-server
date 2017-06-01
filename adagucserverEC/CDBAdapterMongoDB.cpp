@@ -44,6 +44,11 @@ const char *CDBAdapterMongoDB::className="CDBAdapterMongoDB";
 
 //#define CDBAdapterMongoDB_DEBUG
 
+/* Default values for mongo queries */
+#define N_TO_RETURN_0 0
+#define N_TO_RETURN_1 1
+#define N_TO_SKIP_0 0
+
 /* The configuration XML file. */
 CServerConfig::XMLE_Configuration *configurationObject;
 
@@ -201,7 +206,7 @@ CT::string CDBAdapterMongoDB::getAdagucConfig(CT::string dataSetName, CT::string
     mongo::BSONObj selectQuery = selectQueryBuilder.obj();
   
     /* Executing the query. */
-    std::auto_ptr<mongo::DBClientCursor> queryResultCursor = DB->query(dataSetsTableMongoDB, mongo::Query(query), 0, 0, &selectQuery);
+    std::auto_ptr<mongo::DBClientCursor> queryResultCursor = DB->query(dataSetsTableMongoDB, mongo::Query(query), N_TO_RETURN_0, N_TO_SKIP_0, &selectQuery);
   
     CT::string returnValue = "";
     if(queryResultCursor->more()) {
@@ -242,7 +247,7 @@ int checkTableMongo(const char * pszTableName,const char *pszColumns) {
     mongo::BSONObj selectQuery = selectQueryBuilder.obj();
   
     /* Executing the query. */
-    std::auto_ptr<mongo::DBClientCursor> queryResultCursor = DB->query(dataGranulesTableMongoDB, mongo::Query(query), 0, 0, &selectQuery);
+    std::auto_ptr<mongo::DBClientCursor> queryResultCursor = DB->query(dataGranulesTableMongoDB, mongo::Query(query), N_TO_RETURN_0, N_TO_SKIP_0, &selectQuery);
   
     /* The only thing we need is the 'adaguc' field of the MongoDB record. */
     mongo::BSONObj record = queryResultCursor->next().getObjectField("adaguc");
@@ -771,7 +776,7 @@ int CDBAdapterMongoDB::autoUpdateAndScanDimensionTables(CDataSource *dataSource)
         
         std::auto_ptr<mongo::DBClientCursor> queryResultCursor;
         
-        queryResultCursor = DB->query(dataGranulesTableMongoDB,mongo::Query(the_query),1, 0, &objBSON);
+        queryResultCursor = DB->query(dataGranulesTableMongoDB,mongo::Query(the_query),N_TO_RETURN_1, N_TO_SKIP_0, &objBSON);
 
         CT::string columnToReturn = "path,filedate,";
         columnToReturn.concat(dimName.c_str());
@@ -887,7 +892,7 @@ CDBStore::Store *CDBAdapterMongoDB::getMin(const char *name,const char *table) {
     
     // -------------------------------
     
-    std::auto_ptr<mongo::DBClientCursor> checkForAggregation = DB->query(dataGranulesTableMongoDB, query , 1, 0);
+    std::auto_ptr<mongo::DBClientCursor> checkForAggregation = DB->query(dataGranulesTableMongoDB, query , N_TO_RETURN_1, N_TO_SKIP_0);
     
     bool isAggregation = checkForAggregation->next().getObjectField("adaguc").getField(getCurrentDimension()).Array().size() > 1;
     
@@ -903,7 +908,7 @@ CDBStore::Store *CDBAdapterMongoDB::getMin(const char *name,const char *table) {
   
     /* MongoDB uses std::auto_ptr for getting all records. */
     std::auto_ptr<mongo::DBClientCursor> queryResultCursor;
-    queryResultCursor = DB->query(dataGranulesTableMongoDB,query, 1, 0, &objBSON);
+    queryResultCursor = DB->query(dataGranulesTableMongoDB,query, N_TO_RETURN_1, N_TO_SKIP_0, &objBSON);
   
     /* Only need one record, so only the 'name' variable. */
     std::string buff = name;
@@ -958,7 +963,7 @@ CDBStore::Store *CDBAdapterMongoDB::getMax(const char *name,const char *table) {
     
     // -------------------------------
     
-    std::auto_ptr<mongo::DBClientCursor> checkForAggregation = DB->query(dataGranulesTableMongoDB, query , 1, 0);
+    std::auto_ptr<mongo::DBClientCursor> checkForAggregation = DB->query(dataGranulesTableMongoDB, query , N_TO_RETURN_1, N_TO_SKIP_0);
     
     bool isAggregation = checkForAggregation->next().getObjectField("adaguc").getField(getCurrentDimension()).Array().size() > 1;
     
@@ -974,7 +979,7 @@ CDBStore::Store *CDBAdapterMongoDB::getMax(const char *name,const char *table) {
   
     /* MongoDB uses std::auto_ptr for getting all records. */
     std::auto_ptr<mongo::DBClientCursor> queryResultCursor;
-    queryResultCursor = DB->query(dataGranulesTableMongoDB,query, 1, 0, &selectingQuery);
+    queryResultCursor = DB->query(dataGranulesTableMongoDB,query, N_TO_RETURN_1, N_TO_SKIP_0, &selectingQuery);
   
     std::string buff = name;
     buff.append(",");
@@ -1037,7 +1042,7 @@ CDBStore::Store *CDBAdapterMongoDB::getUniqueValuesOrderedByValue(const char *na
     mongo::Query query = mongo::Query(queryAsObj).sort(correctedNameAsString.c_str(), orderDescOrAsc ? 1 : -1);
 
     std::auto_ptr<mongo::DBClientCursor> queryResultCursor;
-    queryResultCursor = DB->query(dataGranulesTableMongoDB, query, limit, 0, &queryObj);
+    queryResultCursor = DB->query(dataGranulesTableMongoDB, query, limit, N_TO_SKIP_0, &queryObj);
 
     /* Again, only one column must be returned. */
     std::string columns = name;
@@ -1045,7 +1050,7 @@ CDBStore::Store *CDBAdapterMongoDB::getUniqueValuesOrderedByValue(const char *na
     
     // -------------------------------
     
-    std::auto_ptr<mongo::DBClientCursor> checkForAggregation = DB->query(dataGranulesTableMongoDB, query , 1, 0);
+    std::auto_ptr<mongo::DBClientCursor> checkForAggregation = DB->query(dataGranulesTableMongoDB, query , N_TO_RETURN_1, N_TO_SKIP_0);
     
     bool isAggregation = checkForAggregation->next().getObjectField("adaguc").getField(getCurrentDimension()).Array().size() > 1;
     
@@ -1113,7 +1118,7 @@ CDBStore::Store *CDBAdapterMongoDB::getUniqueValuesOrderedByIndex(const char *na
   
     mongo::Query query = mongo::Query(theQuery).sort(sortingFields);
   
-    std::auto_ptr<mongo::DBClientCursor> queryResultCursor = DB->query(dataGranulesTableMongoDB, query, limit, 0, &queryObj);
+    std::auto_ptr<mongo::DBClientCursor> queryResultCursor = DB->query(dataGranulesTableMongoDB, query, limit, N_TO_SKIP_0, &queryObj);
   
     std::string columns = name;
     columns.append(",");
@@ -1208,7 +1213,7 @@ CDBStore::Store *CDBAdapterMongoDB::getFilesAndIndicesForDimensions(CDataSource 
     mongo::BSONObj indexFieldSelector = indexBuilder.obj();
     
     // Executing the query, limiting the query to 1.
-    std::auto_ptr<mongo::DBClientCursor> queryResultCursorAggregationCheck = DB->query(dataGranulesTableMongoDB, mongo::Query(theQuery), 1, 0, &indexFieldSelector);
+    std::auto_ptr<mongo::DBClientCursor> queryResultCursorAggregationCheck = DB->query(dataGranulesTableMongoDB, mongo::Query(theQuery), N_TO_RETURN_1, N_TO_SKIP_0, &indexFieldSelector);
     
     // Boolean for checking if the granule is an aggregation. By default false.
     bool isAggregation = false;
@@ -1226,7 +1231,7 @@ CDBStore::Store *CDBAdapterMongoDB::getFilesAndIndicesForDimensions(CDataSource 
     }
     /* --------------------------------- */
   
-    std::auto_ptr<mongo::DBClientCursor> queryResultCursor = DB->query(dataGranulesTableMongoDB, mongo::Query(theQuery).sort(getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()),-1), 1, 0, &selectingQuery);
+    std::auto_ptr<mongo::DBClientCursor> queryResultCursor = DB->query(dataGranulesTableMongoDB, mongo::Query(theQuery).sort(getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()),-1), N_TO_RETURN_1, N_TO_SKIP_0, &selectingQuery);
 
     std::string labels = "path,";
     labels.append(dataSource->requiredDims[0]->netCDFDimName.c_str());
@@ -1408,7 +1413,7 @@ CDBStore::Store *CDBAdapterMongoDB::getFilesForIndices(CDataSource *dataSource,s
     // -------------------------------------------------------------------------------------
     // Select the granules and build the CDBStore.
     // -------------------------------------------------------------------------------------
-    std::auto_ptr<mongo::DBClientCursor> queryResultCursor = DB->query(dataGranulesTableMongoDB, mongo::Query(queryObjBSON).sort(sortOrderBuilder.obj()) , 0, 0, &desiredFieldsObjBSON);
+    std::auto_ptr<mongo::DBClientCursor> queryResultCursor = DB->query(dataGranulesTableMongoDB, mongo::Query(queryObjBSON).sort(sortOrderBuilder.obj()), N_TO_RETURN_0, N_TO_SKIP_0, &desiredFieldsObjBSON);
 
     #ifdef CDBAdapterMongoDB_DEBUG
     CDBDebug("Start[0] = %d, count[0] = %d, stride[0] = %d", start[0], count[0], stride[0]);
@@ -1474,7 +1479,7 @@ CDBStore::Store *CDBAdapterMongoDB::getDimensionInfoForLayerTableAndLayerName(co
     mongo::BSONObj dataSetSelectingObj = dataSetSelecting.obj();
   
     /* Executing the query. */
-    std::auto_ptr<mongo::DBClientCursor> ptrForDimension = DB->query(dataSetsTableMongoDB, mongo::Query(dataSetQuery), 1, 0, &dataSetSelectingObj);
+    std::auto_ptr<mongo::DBClientCursor> ptrForDimension = DB->query(dataSetsTableMongoDB, mongo::Query(dataSetQuery), N_TO_RETURN_1, N_TO_SKIP_0, &dataSetSelectingObj);
     
     const char* dimensionName;
     if(ptrForDimension->more()) {
@@ -1516,7 +1521,7 @@ CDBStore::Store *CDBAdapterMongoDB::getDimensionInfoForLayerTableAndLayerName(co
 
     /* Collecting the results. */
     std::auto_ptr<mongo::DBClientCursor> queryResultCursor;
-    queryResultCursor = DB->query(dataGranulesTableMongoDB,mongo::Query(selectingCorrectGranuleObj), 1, 0, &selectedColumns);
+    queryResultCursor = DB->query(dataGranulesTableMongoDB,mongo::Query(selectingCorrectGranuleObj), N_TO_RETURN_1, N_TO_SKIP_0, &selectedColumns);
 
     /* Making a store of it. */
     CDBStore::Store *store = ptrToStore(queryResultCursor, tableCombi.find("autoconfigure_dimensions")->second.c_str(), 0);
