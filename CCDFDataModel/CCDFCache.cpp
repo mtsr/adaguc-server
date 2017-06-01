@@ -29,6 +29,7 @@ const char *CDFCache::className="CDFCache";
 #include "CCDFDataModel.h"
 #include "CCDFNetCDFIO.h"
 #include "CCDFStore.h"
+#include "assert.h"
 //#define CCDFCACHE_DEBUG
 //#define CCDFCACHE_DEBUG_LOW
 
@@ -46,20 +47,20 @@ CCache * CDFCache::getCCache(const char * directory, const char *fileName){
 }
 
 
-int CDFCache::setHowToUseCache(const char* cacheUsage) {
-  if (!cacheUsage) {
-    return 0;
-  }
-  #ifdef CCDFCACHE_DEBUG
-    CDBDebug("Cache is being used for: %s", cacheUsage);
-  #endif
+void CDFCache::setHowToUseCache(CDFCache::CacheType cacheUsage) {
+  assert (cacheUsage != NULL);
   
   howToUseCache = cacheUsage;
-  return 1;
 }
 
-CT::string CDFCache::getHowToUseCache() {
+CDFCache::CacheType CDFCache::getHowToUseCache() {
   return howToUseCache;
+}
+
+CDFCache::CacheType CDFCache::getCacheTypeFromString(CT::string cacheType) {
+  if (cacheType.equals("header")) { return header; }
+  else if (cacheType.equals("all")) { return all; }
+  else { return none; }
 }
 
 int CDFCache::readBinaryData(const char * filename,void **data, CDFType type, size_t &varSize){
@@ -224,7 +225,17 @@ int CDFCache::open(const char *fileName,CDFObject *cdfObject,bool readOrWrite){
       // We shouldn't reorder the dimension variables when we only use the header in the cache.
       // TODO: Make dependent on config file.
       bool writeDimVarsFirst = false;
-      (howToUseCache.equals("header") ? writeDimVarsFirst = false : writeDimVarsFirst = true);
+      
+      switch(howToUseCache) {
+        case header: 
+          writeDimVarsFirst = false;
+          break;
+        case none: case all:
+          writeDimVarsFirst = true;
+          break;
+        default:
+          break;
+      }
 
       writer->write(cacheFilename.c_str(), writeDimVarsFirst);
 

@@ -65,7 +65,7 @@ int CDFNetCDFReader::_readVariableData(CDF::Variable *var, CDFType type){
 int CDFNetCDFReader::_readVariableData(CDF::Variable *var, CDFType type,size_t *start,size_t *count,ptrdiff_t *stride){
   int nDims,nVars,nRootAttributes,unlimDimIdP;
 
-  if(cdfCache!=NULL && !cdfCache->getHowToUseCache().equals("header")){
+  if(cdfCache!=NULL && cdfCache->getHowToUseCache() != CDFCache::header){
     #ifdef CCDFNETCDFIO_DEBUG_OPEN
       CDBDebug("Looking into cache %s of type %s",var->name.c_str(),CDF::getCDFDataTypeName(type).c_str());
     #endif
@@ -218,7 +218,7 @@ int CDFNetCDFReader::_readVariableData(CDF::Variable *var, CDFType type,size_t *
       return 1;
     }
 
-    if(cdfCache!=NULL && !cdfCache->getHowToUseCache().equals("header")){
+    if(cdfCache!=NULL && cdfCache->getHowToUseCache() != CDFCache::header){
       CDBDebug("Putting into cache %s",var->name.c_str());
       int cacheStatus = cdfCache->readVariableData(var, type,start,count,stride,true);
       if(cacheStatus == 0) return 0;
@@ -346,7 +346,7 @@ int CDFNetCDFReader::_readVariableData(CDF::Variable *var, CDFType type,size_t *
   
   //warper.warpLonData(var);
 
-  if(cdfCache!=NULL && !cdfCache->getHowToUseCache().equals("header")){
+  if(cdfCache!=NULL && cdfCache->getHowToUseCache() != CDFCache::header){
     #ifdef CCDFNETCDFIO_DEBUG
     CDBDebug("Putting into cache %s",var->name.c_str());
     #endif

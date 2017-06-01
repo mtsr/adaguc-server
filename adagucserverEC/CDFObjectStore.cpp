@@ -283,8 +283,9 @@ CDFObject *CDFObjectStore::openCDFObjectHeaderWithoutStore(CDataSource *dataSour
       if(srvParams->isAutoResourceCacheEnabled()){
         cdfCache = new CDFCache(cacheDir);
 
-        const char* cacheUsage = srvParams->cfg->AutoResource[0]->attr.enablecache.c_str();
-        cdfCache->setHowToUseCache(cacheUsage);
+        CT::string cacheUsage = srvParams->cfg->AutoResource[0]->attr.enablecache.c_str();
+        CDFCache::CacheType cacheType = CDFCache::getCacheTypeFromString(cacheUsage);
+        cdfCache->setHowToUseCache(cacheType);
 
         cdfReader->cdfCache = cdfCache;
       }
