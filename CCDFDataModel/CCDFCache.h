@@ -43,19 +43,16 @@ class CDFCache{
 private:
   CCache* cache;
   CT::string cacheDir;
-  /* 
-   * Options are:
-   * - none
-   * - header
-   * - all
-   */
-  CT::string howToUseCache;
   
   CCache* getCCache(const char * directory, const char *fileName);
   
   int writeBinaryData(const char * filename,void **data,CDFType type, size_t varSize);
   int readBinaryData(const char * filename,void **data, CDFType type, size_t &varSize);
 public:
+  
+  enum CacheType {none, header, all};
+  CacheType howToUseCache;
+
   DEF_ERRORFUNCTION();
    
   CDFCache(){
@@ -64,7 +61,7 @@ public:
   CDFCache(CT::string cacheDir){
     //CDBDebug("DIRECTORY %s",cacheDir.c_str());
     this->cacheDir = cacheDir;
-    this->howToUseCache = NULL;
+    this->howToUseCache = none;
     cache = NULL;
   }
 
@@ -74,12 +71,18 @@ public:
    * 0 for not succeeded
    * 1 for succeeded
    */
-  int setHowToUseCache(const char* cacheUsage);
+  void setHowToUseCache(CDFCache::CacheType cacheUsage);
 
   /*
    * Get how the cache is being used.
    */
-  CT::string getHowToUseCache();
+  CDFCache::CacheType getHowToUseCache();
+
+  /*
+   * Get the corresponding enum value from a string value.
+   * Only options are: "header" and "all". The rest will return "none".
+   */
+  static CDFCache::CacheType getCacheTypeFromString(CT::string cacheType);
 
   ~CDFCache(){
     delete cache;
