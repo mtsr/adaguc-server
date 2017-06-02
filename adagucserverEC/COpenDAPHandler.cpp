@@ -494,19 +494,49 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, C
         #ifdef COPENDAPHANDLER_DEBUG
         CDBDebug("This layer has no dims, adding one virtual time step.");
         #endif
+
+        #ifdef ADAGUC_USE_KDCMONGODB
+        /* Extracting the dataset name and version from the filepath. */
+        CT::string opendapFilePath = path;
+        CT::string * dsNameAndVersion = opendapFilePath.splitToArray("/")[1].splitToArray("_");
+
+        /* Isolating the dataset name, and decode it. */
+        CT::string dsName = dsNameAndVersion[0];
+        dsName.decodeURLSelf();
+
+        /* Isolating the dataset version, and decode it. */
+        CT::string dsVersion = dsNameAndVersion[1];
+        dsVersion.decodeURLSelf();
+
+        const char* fullPathOfOneGranule = CDBAdapterMongoDB::firstGranuleLookup(dsName.c_str(), dsVersion.c_str());
+
+        if (fullPathOfOneGranule == NULL) {
+            CDBError("Could not find a corresponding filepath of one granule of dataset [%s, %s]",
+                     dsName.c_str(), dsVersion.c_str());
+            delete dataSource;
+            return 1;
+        }
+
+        dataSource->addStep(fullPathOfOneGranule, NULL);
+        #else
         CDirReader dirReader;
+
         if(CDBFileScanner::searchFileNames(&dirReader, dataSource->cfgLayer->FilePath[0]->value.c_str(),
                                            dataSource->cfgLayer->FilePath[0]->attr.filter, NULL) != 0){
             CDBError("Could not find any filename");
             delete dataSource;
             return 1;
         }
+
         if(dirReader.fileList.size() == 0){
             CDBError("dirReader.fileList.size()==0");
             delete dataSource;
             return 1;
         }
+
         dataSource->addStep(dirReader.fileList[0]->fullName.c_str(), NULL);
+        #endif
+
         dataSource->getCDFDims()->addDimension("time", "0", 0);
     }
 

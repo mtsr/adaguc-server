@@ -1671,6 +1671,45 @@ int CDBAdapterMongoDB::createDimTableTimeStamp(const char *dimname,const char *t
 }
 
 /*
+ * Lookup for the full path of one granule of a certain dataset.
+ * It's a replacement for a full directory search OPeNDAP uses to get one header out of one file.
+ * @param   const char*     The name of the dataset
+ * @param   const char*     The version of the dataset
+ */
+const char* CDBAdapterMongoDB::firstGranuleLookup(const char* datasetName, const char* datasetVersion) {
+
+    mongo::DBClientConnection * DB = getDataBaseConnection();
+    if(DB == NULL) {
+        return NULL;
+    }
+
+    /*
+     * Compose the query.
+     */
+    mongo::BSONObjBuilder query;
+    query << "dataSetName" << datasetName << "dataSetVersion" << datasetVersion;
+    mongo::BSONObj objBSON = query.obj();
+
+    /*
+     * Select the fields that are wanted.
+     */
+    mongo::BSONObjBuilder desiredFieldsBuilder;
+    desiredFieldsBuilder << "adaguc.path" << 1 << "_id" << 0;
+    mongo::BSONObj desiredFieldsObjBSON = desiredFieldsBuilder.obj();
+
+    /* Executing the query, only return 1 result. */
+    std::auto_ptr<mongo::DBClientCursor> cursorFromMongoDB = DB->query(dataGranulesTableMongoDB, mongo::Query(objBSON), 1, 0, &desiredFieldsObjBSON);
+
+    if (cursorFromMongoDB->more()) {
+        /* Extract the field and return it. */
+        std::string fullPath = cursorFromMongoDB->next().getObjectField("adaguc").getStringField("path");
+        return fullPath.c_str();
+    } else {
+        return NULL;
+    }
+}
+
+/*
  * Checking if the files exists in the MongoDB collection.
  * 
  * @param   const char*   The filename or dataSetName.
