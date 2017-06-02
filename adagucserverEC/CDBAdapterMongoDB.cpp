@@ -1687,7 +1687,7 @@ const char* CDBAdapterMongoDB::firstGranuleLookup(const char* datasetName, const
      * Compose the query.
      */
     mongo::BSONObjBuilder query;
-    query << "dataSetName" << datasetName << "dataSetVersion" << datasetVersion;
+    query << "dataSetName" << datasetName << "dataSetVersion" << datasetVersion << "adaguc" << BSON("$exists" << "true");
     mongo::BSONObj objBSON = query.obj();
 
     /*
