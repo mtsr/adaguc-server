@@ -508,16 +508,16 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, C
         CT::string dsVersion = dsNameAndVersion[1];
         dsVersion.decodeURLSelf();
 
-        const char* fullPathOfOneGranule = CDBAdapterMongoDB::firstGranuleLookup(dsName.c_str(), dsVersion.c_str());
+        CT::string fullPathOfOneGranule(CDBAdapterMongoDB::firstGranuleLookup(dsName.c_str(), dsVersion.c_str()));
 
-        if (fullPathOfOneGranule == NULL) {
+        if (fullPathOfOneGranule.empty()) {
             CDBError("Could not find a corresponding filepath of one granule of dataset [%s, %s]",
                      dsName.c_str(), dsVersion.c_str());
             delete dataSource;
             return 1;
         }
-
-        dataSource->addStep(fullPathOfOneGranule, NULL);
+        
+        dataSource->addStep(fullPathOfOneGranule.c_str(), NULL);
         #else
         CDirReader dirReader;
 

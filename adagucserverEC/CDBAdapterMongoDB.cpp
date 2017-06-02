@@ -1676,11 +1676,11 @@ int CDBAdapterMongoDB::createDimTableTimeStamp(const char *dimname,const char *t
  * @param   const char*     The name of the dataset
  * @param   const char*     The version of the dataset
  */
-const char* CDBAdapterMongoDB::firstGranuleLookup(const char* datasetName, const char* datasetVersion) {
+CT::string CDBAdapterMongoDB::firstGranuleLookup(const char* datasetName, const char* datasetVersion) {
 
     mongo::DBClientConnection * DB = getDataBaseConnection();
     if(DB == NULL) {
-        return NULL;
+        return "";
     }
 
     /*
@@ -1702,10 +1702,10 @@ const char* CDBAdapterMongoDB::firstGranuleLookup(const char* datasetName, const
 
     if (cursorFromMongoDB->more()) {
         /* Extract the field and return it. */
-        std::string fullPath = cursorFromMongoDB->next().getObjectField("adaguc").getStringField("path");
-        return fullPath.c_str();
+        CT::string fullPath(cursorFromMongoDB->next().getObjectField("adaguc").getStringField("path"));
+        return fullPath;
     } else {
-        return NULL;
+        return "";
     }
 }
 
