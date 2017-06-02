@@ -55,7 +55,7 @@ public:
 };
 
 
-int COpenDAPHandler::getDimSize(CDataSource *dataSource, const char *name){
+int COpenDAPHandler::getDimSize(CDataSource *dataSource, const char *name, CDFObject *cdfHeaderObject){
     #ifdef COPENDAPHANDLER_DEBUG
     CDBDebug("getDimSize There are %d dims for %s",dataSource->cfgLayer->Dimension.size(),name);
     #endif
@@ -106,11 +106,9 @@ int COpenDAPHandler::getDimSize(CDataSource *dataSource, const char *name){
     //Check wether we can find the dim in the netcdf file
     try{
         #ifdef COPENDAPHANDLER_DEBUG
-        CDBDebug("getDimSize Trying to lookup in cdfObject");
+        CDBDebug("getDimSize Trying to lookup in cdfHeaderObject");
         #endif
-        CDF::Dimension *v = CDFObjectStore::getCDFObjectStore()->getCDFObjectHeaderPlain(dataSource->srvParams,
-                                                                                         dataSource->getFileName())->getDimension(
-                name);
+        CDF::Dimension *v = cdfHeaderObject->getDimension(name);
         #ifdef COPENDAPHANDLER_DEBUG
         CDBDebug("Length = %d",v->length);
         #endif
@@ -676,7 +674,7 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, C
 
                         for(size_t j = 0; j < v->dimensionlinks.size(); j ++){
                             int size = v->dimensionlinks[j]->getSize();
-                            int dimSize = getDimSize(dataSource, v->dimensionlinks[j]->name.c_str());
+                            int dimSize = getDimSize(dataSource, v->dimensionlinks[j]->name.c_str(), cdfObject);
                             #ifdef COPENDAPHANDLER_DEBUG
                             CDBDebug("Getting DimSize %d",dimSize);
                             #endif
@@ -937,8 +935,6 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, C
         }
 
         if(requestInfo.isDASRequest){
-            CDFObject *cdfObject = CDFObjectStore::getCDFObjectStore()->getCDFObjectHeaderPlain(dataSource->srvParams,
-                                                                                                dataSource->getFileName());
             CT::string output = "";
             output.concat("Attributes {\n");
             for(size_t j = 0; j < cdfObject->variables.size(); j ++){
