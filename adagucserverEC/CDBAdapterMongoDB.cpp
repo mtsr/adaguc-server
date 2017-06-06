@@ -322,9 +322,11 @@ CDBAdapterMongoDB::~CDBAdapterMongoDB() {
  */
 const char* CDBAdapterMongoDB::getCorrectedColumnName(const char* column_name) {
         
-    std::string prefix = "adaguc.";
-        
-    return prefix.append(column_name).c_str();
+    const char* prefix = "adaguc.";
+    std::stringstream ss;
+
+    ss << prefix << column_name;
+    return ss.str().c_str();
 }
 
 /*
@@ -1022,7 +1024,6 @@ CDBStore::Store *CDBAdapterMongoDB::getUniqueValuesOrderedByValue(const char *na
 
     /* The corrected name. PostgreSQL columns are different compared to MongoDB fields.  */
     const char* correctedName = getCorrectedColumnName(name);
-    std::string correctedNameAsString(correctedName);
 
     /* What do we want to select? Only the name variable. */
     mongo::BSONObjBuilder queryBSON;
@@ -1039,7 +1040,7 @@ CDBStore::Store *CDBAdapterMongoDB::getUniqueValuesOrderedByValue(const char *na
     mongo::BSONObj queryAsObj = theQuery.obj();
   
     /* Making a query sorted by the selected value. */
-    mongo::Query query = mongo::Query(queryAsObj).sort(correctedNameAsString.c_str(), orderDescOrAsc ? 1 : -1);
+    mongo::Query query = mongo::Query(queryAsObj).sort(correctedName, orderDescOrAsc ? 1 : -1);
 
     std::auto_ptr<mongo::DBClientCursor> queryResultCursor;
     queryResultCursor = DB->query(dataGranulesTableMongoDB, query, limit, N_TO_SKIP_0, &queryObj);
