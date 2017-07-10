@@ -2175,11 +2175,6 @@ int CRequest::process_querystring(){
   }*/
   
 
-  #ifdef ADAGUC_USE_KDCMONGODB
-    CDBAdapterMongoDB *mongoDB = new CDBAdapterMongoDB();
-    mongoDB->setConfig(srvParam->cfg);
-    delete mongoDB;
-  #endif
 
   /**
    * Check for OPENDAP

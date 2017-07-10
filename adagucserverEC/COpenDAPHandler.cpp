@@ -506,7 +506,13 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, C
         CT::string dsVersion = dsNameAndVersion[1];
         dsVersion.decodeURLSelf();
 
-        CT::string fullPathOfOneGranule(CDBAdapterMongoDB::firstGranuleLookup(dsName.c_str(), dsVersion.c_str()));
+        CDBAdapterMongoDB *mongoDB = (CDBAdapterMongoDB*) CDBFactory::getDBAdapter(srvParam->cfg);
+        if (mongoDB == NULL) {
+            CDBError("Failed to initialize CDBAdapterMongoDB");
+            return 1;
+        }
+
+        CT::string fullPathOfOneGranule(mongoDB->firstGranuleLookup(dsName.c_str(), dsVersion.c_str()));
 
         if (fullPathOfOneGranule.empty()) {
             CDBError("Could not find a corresponding filepath of one granule of dataset [%s, %s]",

@@ -2,12 +2,7 @@
 #include "CTypes.h"
 #include "CServerError.h"
 #include "CDFObjectStore.h"
-
-#ifdef ADAGUC_USE_KDCMONGODB
-  #include "mongo/client/dbclient.h"
-  #include "mongo/bson/bson.h"
-  #include "CDBAdapterMongoDB.h"
-#endif
+#include "CDBFactory.h"
 
 const char *CAutoResource::className = "CAutoResource";
 
@@ -72,15 +67,15 @@ int CAutoResource::configureDataset(CServerParams *srvParam,bool plain){
     
       tmp_datasetname.substringSelf(0, lastIndexOfUnderscore);
       tmp_datasetversion.substringSelf(lastIndexOfUnderscore + 1, internalDatasetLocation.length());
-    
-      CDBAdapterMongoDB *mongoDB = new CDBAdapterMongoDB();
+
+      CDBAdapterMongoDB *mongoDB = (CDBAdapterMongoDB*) CDBFactory::getDBAdapter(srvParam->cfg);
       if (mongoDB == NULL) {
         CDBError("Failed to initialize CDBAdapterMongoDB");
         return 1;
       }
       datasetConfigFile = mongoDB->getAdagucConfig(tmp_datasetname.c_str(), tmp_datasetversion.c_str());
-      
-      delete mongoDB;
+
+      CDBFactory::clear();
     #endif
 
     CDBDebug("Found dataset %s",datasetConfigFile.c_str());

@@ -177,7 +177,7 @@ class CDBAdapterMongoDB:public CDBAdapter{
      * @param   const char*     The name of the dataset
      * @param   const char*     The version of the dataset
      */
-    static CT::string firstGranuleLookup(const char* datasetName, const char* datasetVersion);
+    CT::string firstGranuleLookup(const char* datasetName, const char* datasetVersion);
 
     /*
      *  Checking if the correct data is available in the database.datagranules database. 
