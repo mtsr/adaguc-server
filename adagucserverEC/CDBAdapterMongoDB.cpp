@@ -618,6 +618,19 @@ CDBStore::Store *ptrToStore(std::auto_ptr<mongo::DBClientCursor> cursor, const c
     return store;
 }
 
+bool isAggregated(std::auto_ptr<mongo::DBClientCursor> checkForAggregation){
+
+    bool isAggregation = false;
+    mongo::BSONElement currentDimensionField = checkForAggregation->next().getObjectField("adaguc").getField(getCurrentDimension());
+    if (!currentDimensionField.eoo()) {
+        #ifdef CDBAdapterMongoDB_DEBUG
+        CDBDebug("The dataset has a %s dimension in the database, check if it is aggregated.", getCurrentDimension());
+        #endif
+        isAggregation = currentDimensionField.Array().size() > 1;
+    }
+    return isAggregation;
+}
+
 /*
  * Setting the config file.
  * 
@@ -895,9 +908,9 @@ CDBStore::Store *CDBAdapterMongoDB::getMin(const char *name,const char *table) {
     // -------------------------------
     
     std::auto_ptr<mongo::DBClientCursor> checkForAggregation = DB->query(dataGranulesTableMongoDB, query , N_TO_RETURN_1, N_TO_SKIP_0);
-    
-    bool isAggregation = checkForAggregation->next().getObjectField("adaguc").getField(getCurrentDimension()).Array().size() > 1;
-    
+
+    bool isAggregation = isAggregated(checkForAggregation);
+
     // -------------------------------
   
     mongo::BSONObjBuilder queryForSelecting;
@@ -948,10 +961,10 @@ CDBStore::Store *CDBAdapterMongoDB::getMax(const char *name,const char *table) {
     if(DB == NULL) {
         return NULL;
     }
-    
+
     /* Get the correct MongoDB path. */
     std::string usedName = getCorrectedColumnName(name);
-  
+
     mongo::BSONObjBuilder queryBuilder;
     if(!hasEnding(table, "/")) {
         queryBuilder << "fileName" << table << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion;
@@ -959,16 +972,15 @@ CDBStore::Store *CDBAdapterMongoDB::getMax(const char *name,const char *table) {
         queryBuilder << "adaguc.dataSetPath" << table << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion; 
     }
     mongo::BSONObj queryObject = queryBuilder.obj();
-  
+
     /* Executing the query and sort by name, in ascending order. */
     mongo::Query query = mongo::Query(queryObject).sort(usedName,-1);
-    
+
     // -------------------------------
     
     std::auto_ptr<mongo::DBClientCursor> checkForAggregation = DB->query(dataGranulesTableMongoDB, query , N_TO_RETURN_1, N_TO_SKIP_0);
-    
-    bool isAggregation = checkForAggregation->next().getObjectField("adaguc").getField(getCurrentDimension()).Array().size() > 1;
-    
+
+    bool isAggregation = isAggregated(checkForAggregation);
     // -------------------------------
   
     mongo::BSONObjBuilder selectingBuilder;
@@ -978,16 +990,16 @@ CDBStore::Store *CDBAdapterMongoDB::getMax(const char *name,const char *table) {
         selectingBuilder << usedName.c_str() << 1 << "_id" << 0;
     }
     mongo::BSONObj selectingQuery = selectingBuilder.obj();
-  
+
     /* MongoDB uses std::auto_ptr for getting all records. */
     std::auto_ptr<mongo::DBClientCursor> queryResultCursor;
     queryResultCursor = DB->query(dataGranulesTableMongoDB,query, N_TO_RETURN_1, N_TO_SKIP_0, &selectingQuery);
-  
+
     std::string buff = name;
     buff.append(",");
     
     CDBStore::Store *maxStore = ptrToStore(queryResultCursor, buff.c_str(), 0);
-  
+
     if(maxStore == NULL){
         setExceptionType(InvalidDimensionValue);
         CDBError("Invalid dimension value for  %s",name);
@@ -998,7 +1010,7 @@ CDBStore::Store *CDBAdapterMongoDB::getMax(const char *name,const char *table) {
     #ifdef MEASURETIME
         StopWatch_Stop("<CDBAdapterMongoDB::getMax");
     #endif
-        
+
     return maxStore; 
 }
 
@@ -1052,9 +1064,9 @@ CDBStore::Store *CDBAdapterMongoDB::getUniqueValuesOrderedByValue(const char *na
     // -------------------------------
     
     std::auto_ptr<mongo::DBClientCursor> checkForAggregation = DB->query(dataGranulesTableMongoDB, query , N_TO_RETURN_1, N_TO_SKIP_0);
-    
-    bool isAggregation = checkForAggregation->next().getObjectField("adaguc").getField(getCurrentDimension()).Array().size() > 1;
-    
+
+    bool isAggregation = isAggregated(checkForAggregation);
+
     // -------------------------------
   
     CDBStore::Store *store = ptrToStore(queryResultCursor, columns.c_str(), 0, isAggregation);
@@ -1221,12 +1233,15 @@ CDBStore::Store *CDBAdapterMongoDB::getFilesAndIndicesForDimensions(CDataSource 
     
     if(queryResultCursorAggregationCheck->more()) {
         mongo::BSONObj value = queryResultCursorAggregationCheck->next();
-        std::vector<mongo::BSONElement> dimensionValues = value.getObjectField("adaguc").getField(dataSource->requiredDims[0]->netCDFDimName.c_str()).Array();
+        mongo::BSONElement dimensionValues = value.getObjectField("adaguc").getField(dataSource->requiredDims[0]->netCDFDimName.c_str());
 
-        for(size_t index = 0; index < dimensionValues.size(); index++) {
-            if(strcmp(dimensionValues[index].valuestr(),queryParamsString.c_str()) == 0) {
-                isAggregation = true;
-                dimIndex = index;
+        if (!dimensionValues.eoo()) {
+            std::vector<mongo::BSONElement> dimensionValuesVector = dimensionValues.Array();
+            for(size_t index = 0; index < dimensionValuesVector.size(); index++) {
+                if(strcmp(dimensionValuesVector[index].valuestr(),queryParamsString.c_str()) == 0) {
+                   isAggregation = true;
+                   dimIndex = index;
+                }
             }
         }
     }
