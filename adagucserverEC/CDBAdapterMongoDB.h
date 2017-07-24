@@ -53,9 +53,10 @@ class CDBAdapterMongoDB:public CDBAdapter{
      * correct the layername. So 'time' becomes 'adaguc.dimension.time.time' for example. 
      * @param   const char*     the column name that must be returned.
      * 
-     * @return  const char*     the corrected column name. 
+     * @return  CT::string     the corrected column name.
      */
-    const char*      getCorrectedColumnName(const char* column_name);
+     CT::string  getCorrectedColumnName(const char* column_name);
+
     
     /*
      * No desciption yet!

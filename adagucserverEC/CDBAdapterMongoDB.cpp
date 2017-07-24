@@ -320,8 +320,8 @@ CDBAdapterMongoDB::~CDBAdapterMongoDB() {
  * @param   const char*   The column name as used in PostgreSQL.
  * @return    const char*   The corrected column name.
  */
-const char* CDBAdapterMongoDB::getCorrectedColumnName(const char* column_name) {
-        
+CT::string CDBAdapterMongoDB::getCorrectedColumnName(const char* column_name) {
+
     const char* prefix = "adaguc.";
     std::stringstream ss;
 
@@ -494,7 +494,7 @@ CDBStore::Store *ptrToStore(std::auto_ptr<mongo::DBClientCursor> cursor, const c
         indexOfDimension = dimIndex;
         numberOfTimes = limitInDocuments + indexOfDimension;
     }
-    
+
     while(indexOfDimension < numberOfTimes) {
         usedColumns = table;
         
@@ -558,6 +558,10 @@ CDBStore::Store *ptrToStore(std::auto_ptr<mongo::DBClientCursor> cursor, const c
             indexOfDimension = dimIndex;
         } else {
             indexOfDimension = 0;
+        }
+
+        if(strcmp(table,"time,") == 0) {
+            numberOfTimes = nextValue.getObjectField("adaguc").getField(getCurrentDimension()).Array().size();
         }
         
         while(indexOfDimension < numberOfTimes) {
@@ -891,7 +895,7 @@ CDBStore::Store *CDBAdapterMongoDB::getMin(const char *name,const char *table) {
     }
 
     /* Get the correct MongoDB path of the current used dimension. */
-    std::string usedName = getCorrectedColumnName(name);
+    CT::string usedName = getCorrectedColumnName(name);
   
     /* Selecting query. */
     mongo::BSONObjBuilder queryBuilder;
@@ -903,7 +907,7 @@ CDBStore::Store *CDBAdapterMongoDB::getMin(const char *name,const char *table) {
     mongo::BSONObj queryObject = queryBuilder.obj();
   
     /* Executing the query and sort by name, in ascending order. */
-    mongo::Query query = mongo::Query(queryObject).sort(usedName,1);
+    mongo::Query query = mongo::Query(queryObject).sort(usedName.c_str(),1);
     
     // -------------------------------
     
@@ -963,7 +967,7 @@ CDBStore::Store *CDBAdapterMongoDB::getMax(const char *name,const char *table) {
     }
 
     /* Get the correct MongoDB path. */
-    std::string usedName = getCorrectedColumnName(name);
+    CT::string usedName = getCorrectedColumnName(name);
 
     mongo::BSONObjBuilder queryBuilder;
     if(!hasEnding(table, "/")) {
@@ -974,7 +978,7 @@ CDBStore::Store *CDBAdapterMongoDB::getMax(const char *name,const char *table) {
     mongo::BSONObj queryObject = queryBuilder.obj();
 
     /* Executing the query and sort by name, in ascending order. */
-    mongo::Query query = mongo::Query(queryObject).sort(usedName,-1);
+    mongo::Query query = mongo::Query(queryObject).sort(usedName.c_str(),-1);
 
     // -------------------------------
     
@@ -1035,11 +1039,11 @@ CDBStore::Store *CDBAdapterMongoDB::getUniqueValuesOrderedByValue(const char *na
     }
 
     /* The corrected name. PostgreSQL columns are different compared to MongoDB fields.  */
-    const char* correctedName = getCorrectedColumnName(name);
+    CT::string correctedName = getCorrectedColumnName(name);
 
     /* What do we want to select? Only the name variable. */
     mongo::BSONObjBuilder queryBSON;
-    queryBSON << correctedName << 1 << "_id" << 0;
+    queryBSON << correctedName.c_str() << 1 << "_id" << 0;
     mongo::BSONObj queryObj = queryBSON.obj();
   
     /* The query itself. */
@@ -1052,7 +1056,7 @@ CDBStore::Store *CDBAdapterMongoDB::getUniqueValuesOrderedByValue(const char *na
     mongo::BSONObj queryAsObj = theQuery.obj();
   
     /* Making a query sorted by the selected value. */
-    mongo::Query query = mongo::Query(queryAsObj).sort(correctedName, orderDescOrAsc ? 1 : -1);
+    mongo::Query query = mongo::Query(queryAsObj).sort(correctedName.c_str(), orderDescOrAsc ? 1 : -1);
 
     std::auto_ptr<mongo::DBClientCursor> queryResultCursor;
     queryResultCursor = DB->query(dataGranulesTableMongoDB, query, limit, N_TO_SKIP_0, &queryObj);
@@ -1104,15 +1108,15 @@ CDBStore::Store *CDBAdapterMongoDB::getUniqueValuesOrderedByIndex(const char *na
     }
 
     /* The corrected name. Because of MongoDB, it can be that  */
-    const char* correctedName = getCorrectedColumnName(name);
+    CT::string correctedName = getCorrectedColumnName(name);
   
     std::string dimensionName = "dim";
     dimensionName.append(name);
-    const char * correctedDimName = getCorrectedColumnName(dimensionName.c_str());
+    CT::string correctedDimName = getCorrectedColumnName(dimensionName.c_str());
   
     /* What do we want to select? Only the name variable. */
     mongo::BSONObjBuilder queryBSON;
-    queryBSON << correctedName << 1 << correctedDimName << 1 << "_id" << 0;
+    queryBSON << correctedName.c_str() << 1 << correctedDimName.c_str() << 1 << "_id" << 0;
     mongo::BSONObj queryObj = queryBSON.obj();
   
     /* The query itself. */
@@ -1126,7 +1130,7 @@ CDBStore::Store *CDBAdapterMongoDB::getUniqueValuesOrderedByIndex(const char *na
   
     /* Sorting on multiple fields. So creating a BSON */
     mongo::BSONObjBuilder sortingFieldsBuilder;
-    sortingFieldsBuilder << correctedName << 1 << correctedDimName << 1;
+    sortingFieldsBuilder << correctedName.c_str() << 1 << correctedDimName.c_str() << 1;
     mongo::BSONObj sortingFields = sortingFieldsBuilder.obj();
   
     mongo::Query query = mongo::Query(theQuery).sort(sortingFields);
@@ -1201,16 +1205,16 @@ CDBStore::Store *CDBAdapterMongoDB::getFilesAndIndicesForDimensions(CDataSource 
     if (queryParamsString.find("/") != std::string::npos) {
         CT::string convertedToCtString(queryParamsString.c_str());
         CT::string* splittedString = convertedToCtString.splitToArray("/");
-        queryBuilder << getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()) << mongo::GTE << splittedString[0].c_str() << mongo::LT << splittedString[1].c_str();
+        queryBuilder << getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()).c_str() << mongo::GTE << splittedString[0].c_str() << mongo::LT << splittedString[1].c_str();
     } else {
         /* We don't have a time range. */
-        queryBuilder << getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()) << queryParamsString.c_str();
+        queryBuilder << getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()).c_str() << queryParamsString.c_str();
     }
   
     mongo::BSONObj theQuery = queryBuilder.obj();
   
     mongo::BSONObjBuilder selectingBuilder;
-    selectingBuilder << "adaguc.path" << 1 << getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()) << 1 << "_id" << 0;
+    selectingBuilder << "adaguc.path" << 1 << getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()).c_str() << 1 << "_id" << 0;
   
     mongo::BSONObj selectingQuery = selectingBuilder.obj();
     
@@ -1222,7 +1226,7 @@ CDBStore::Store *CDBAdapterMongoDB::getFilesAndIndicesForDimensions(CDataSource 
     
     // Only need 1 field in return, the time field.
     mongo::BSONObjBuilder indexBuilder;
-    indexBuilder << getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()) << 1 << "_id" << 0;
+    indexBuilder << getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()).c_str() << 1 << "_id" << 0;
     mongo::BSONObj indexFieldSelector = indexBuilder.obj();
     
     // Executing the query, limiting the query to 1.
@@ -1247,7 +1251,7 @@ CDBStore::Store *CDBAdapterMongoDB::getFilesAndIndicesForDimensions(CDataSource 
     }
     /* --------------------------------- */
   
-    std::auto_ptr<mongo::DBClientCursor> queryResultCursor = DB->query(dataGranulesTableMongoDB, mongo::Query(theQuery).sort(getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()),-1), N_TO_RETURN_1, N_TO_SKIP_0, &selectingQuery);
+    std::auto_ptr<mongo::DBClientCursor> queryResultCursor = DB->query(dataGranulesTableMongoDB, mongo::Query(theQuery).sort(getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()).c_str(),-1), N_TO_RETURN_1, N_TO_SKIP_0, &selectingQuery);
 
     std::string labels = "path,";
     labels.append(dataSource->requiredDims[0]->netCDFDimName.c_str());
