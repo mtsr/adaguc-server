@@ -705,7 +705,7 @@ CT::string CDBAdapterMongoDB::getTableNameForPathFilterAndDimension(const char *
     if(dimension != NULL && strcmp(currentUsedDimension,dimension) != 0 && 
         strcmp(currentUsedDimension,"") != 0) {
         conditionalSecondDimension = "";
-        conditionalSecondDimension.concat(dimension);
+        conditionalSecondDimension.concat(currentUsedDimension);
     }
   
     /* Setting the current layer as a global variable. Needs to be used in the ptrToStore.
@@ -1947,7 +1947,7 @@ int CDBAdapterMongoDB::addFilesToDataBase() {
             fileDate.replaceSelf("T", " ");
             
             CT::string usedDimensionToStore = "adaguc.";
-            usedDimensionToStore.concat(currentUsedDimension);
+            usedDimensionToStore.concat(getCurrentDimension());
                 
             /* And infally the dataset path. */
             char* dataSetPath = (char*) path.c_str();
