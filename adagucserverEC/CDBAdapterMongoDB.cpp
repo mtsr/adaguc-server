@@ -705,7 +705,7 @@ CT::string CDBAdapterMongoDB::getTableNameForPathFilterAndDimension(const char *
     if(dimension != NULL && strcmp(currentUsedDimension,dimension) != 0 && 
         strcmp(currentUsedDimension,"") != 0) {
         conditionalSecondDimension = "";
-        conditionalSecondDimension.concat(currentUsedDimension);
+        conditionalSecondDimension.concat(dimension);
     }
   
     /* Setting the current layer as a global variable. Needs to be used in the ptrToStore.
@@ -800,7 +800,10 @@ int CDBAdapterMongoDB::autoUpdateAndScanDimensionTables(CDataSource *dataSource)
         CT::string columnToReturn = "path,filedate,";
         columnToReturn.concat(dimName.c_str());
         
-        CDBStore::Store *store = ptrToStore(queryResultCursor, columnToReturn.c_str(), 0);
+        CDBStore::Store *store = NULL;
+        if(queryResultCursor->itcount() > 0) {
+            store = ptrToStore(queryResultCursor, columnToReturn.c_str(), 0);
+        }
         
         if(store==NULL){
             tableNotFound=true;
@@ -1477,8 +1480,11 @@ CDBStore::Store *CDBAdapterMongoDB::getDimensionInfoForLayerTableAndLayerName(co
     if(DB == NULL) {
         return NULL;
     }
-  
-    /* Selecting the granule with the specific fileName. */
+    /* Figure out if there is already dimension data for
+     * this layer.
+     * If not, return NULL so the data can be added.
+     * If there is already layer data, return the data.
+     */
     mongo::BSONObjBuilder query;
     if(!hasEnding(layertable, "/")) {
         query << "fileName" << layertable << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion;
@@ -1487,23 +1493,26 @@ CDBStore::Store *CDBAdapterMongoDB::getDimensionInfoForLayerTableAndLayerName(co
     }
     mongo::BSONObj objBSON = query.obj();
   
-    /* Figure out what dimension is being used. 
-     * This is stored in the dataSets collection. */
-    /* Getting the dimension. */
-    mongo::BSONObjBuilder dataSetBuilder;
-    dataSetBuilder << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion;
-    mongo::BSONObj dataSetQuery = dataSetBuilder.obj();
-  
     mongo::BSONObjBuilder dataSetSelecting;
-    dataSetSelecting << "dimension" << 1 << "_id" << 0;
+    CT::string layerToCheck = "adaguc.layer.";
+    layerToCheck.concat(layername);
+    dataSetSelecting << layerToCheck.c_str() << 1 << "_id" << 0;
     mongo::BSONObj dataSetSelectingObj = dataSetSelecting.obj();
   
     /* Executing the query. */
-    std::auto_ptr<mongo::DBClientCursor> ptrForDimension = DB->query(dataSetsTableMongoDB, mongo::Query(dataSetQuery), N_TO_RETURN_1, N_TO_SKIP_0, &dataSetSelectingObj);
+    std::auto_ptr<mongo::DBClientCursor> ptrForDimension = DB->query(dataGranulesTableMongoDB, mongo::Query(objBSON), N_TO_RETURN_1, N_TO_SKIP_0, &dataSetSelectingObj);
     
     const char* dimensionName;
+    /* If the result (dimension info about the layer) is not empty, continue. */
     if(ptrForDimension->more()) {
-        dimensionName = ptrForDimension->next().getStringField("dimension"); 
+        mongo::BSONObj nextObject = ptrForDimension->next();
+        mongo::BSONObj dimensionObjectFromDb = nextObject.getObjectField("dimension");
+        if(dimensionObjectFromDb.isEmpty()) {
+            /* Else, return NULL so data can be added to the database.*/
+            return NULL;
+        } else {
+            dimensionName = nextObject.getStringField("dimension");
+        }
     } else {
         dimensionName = ""; 
         return NULL;
@@ -1730,7 +1739,7 @@ CT::string CDBAdapterMongoDB::firstGranuleLookup(const char* datasetName, const 
 }
 
 /*
- * Checking if the files exists in the MongoDB collection.
+ * Checking if the dimension of a given file exists in the MongoDB collection.
  * 
  * @param   const char*   The filename or dataSetName.
  * @param   const char*   The layer that is being used.
@@ -1749,7 +1758,9 @@ int CDBAdapterMongoDB::checkIfFileIsInTable(const char *tablename,const char *fi
   
     /* Granule needs to have the correct fileName and the correct path. */
     mongo::BSONObjBuilder query;
-    query << "fileName" << tablename << "adaguc.path" << filename << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion;
+    CT::string dimensionToCheck = "adaguc.";
+    dimensionToCheck.concat(currentUsedDimension);
+    query << "fileName" << tablename << "adaguc.path" << filename << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion << dimensionToCheck.c_str() << BSON("$exists" << "true");;
     mongo::BSONObj objBSON = query.obj();
   
     /* Converting the path from the granule to the datasetpath. */
@@ -1947,7 +1958,7 @@ int CDBAdapterMongoDB::addFilesToDataBase() {
             fileDate.replaceSelf("T", " ");
             
             CT::string usedDimensionToStore = "adaguc.";
-            usedDimensionToStore.concat(getCurrentDimension());
+            usedDimensionToStore.concat(currentUsedDimension);
                 
             /* And infally the dataset path. */
             char* dataSetPath = (char*) path.c_str();
@@ -1995,7 +2006,7 @@ int CDBAdapterMongoDB::addFilesToDataBase() {
             /* Update the right dataset. */
             DB->update(dataGranulesTableMongoDB, mongo::Query(selectedGranule), objBSON);
         }
-    
+        it->second.clear();
     }
   
     fileListPerTable.clear();
