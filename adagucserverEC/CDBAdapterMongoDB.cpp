@@ -1957,7 +1957,8 @@ int CDBAdapterMongoDB::addFilesToDataBase() {
             fileDate.substringSelf(1,fileDate.length()-2);
             fileDate.replaceSelf("T", " ");
             
-            CT::string usedDimensionToStore = "adaguc.";
+            /* By default, store in the "adaguc.dimensions" object. */
+            CT::string usedDimensionToStore = "adaguc.dimensions.";
             usedDimensionToStore.concat(currentUsedDimension);
                 
             /* And infally the dataset path. */
@@ -1998,6 +1999,17 @@ int CDBAdapterMongoDB::addFilesToDataBase() {
                 }
             }
 
+
+            /* Temporary fix: store dimensions inside the "adaguc.dimensions".
+             * If the dimensions is either "time" or "none", also store it
+             * outside the "adaguc.dimensions" object.
+            */
+            if (strcmp(currentUsedDimension,"time") == 0 ||
+                strcmp(currentUsedDimension,"none") == 0) {
+                CT::string dimensionToStore = "adaguc.";
+                dimensionToStore.concat(currentUsedDimension);
+                subQueryBuilder << dimensionToStore.c_str() << builder;
+            }
             subQueryBuilder << usedDimensionToStore.c_str() << builder;
 
             queryBuilder << "$set" << subQueryBuilder.obj();
