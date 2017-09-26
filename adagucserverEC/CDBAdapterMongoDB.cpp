@@ -315,6 +315,23 @@ CDBAdapterMongoDB::~CDBAdapterMongoDB() {
 }
 
 /*
+ * Getting the corrected Column name, based on the old MongoDB structure.
+ * This method needs to be deleted one day after the database migration.
+ * "adaguc.dimensions" is the future object to use.
+ * 
+ * @param   const char*   The column name as used in PostgreSQL.
+ * @return    const char*   The corrected column name.
+ */
+CT::string CDBAdapterMongoDB::getOldCorrectedColumnName(const char* column_name) {
+
+    const char* prefix = "adaguc.";
+    std::stringstream ss;
+
+    ss << prefix << column_name;
+    return ss.str().c_str();
+}
+
+/*
  * Getting the corrected Column name, based on the MongoDB structure.
  * 
  * @param   const char*   The column name as used in PostgreSQL.
@@ -322,7 +339,7 @@ CDBAdapterMongoDB::~CDBAdapterMongoDB() {
  */
 CT::string CDBAdapterMongoDB::getCorrectedColumnName(const char* column_name) {
 
-    const char* prefix = "adaguc.";
+    const char* prefix = "adaguc.dimensions.";
     std::stringstream ss;
 
     ss << prefix << column_name;
@@ -508,7 +525,16 @@ CDBStore::Store *ptrToStore(std::auto_ptr<mongo::DBClientCursor> cursor, const c
             std::string fieldValue;
             // If time or dimtime is being used:
             if(strcmp(cName.c_str(),getCurrentDimension()) == 0 || strcmp(cName.c_str(),"time2D") == 0) {
-                VectorWithDimensionValues = firstValue.getObjectField("adaguc").getField(cName.c_str()).Array();
+                // First try to get the "adaguc.dimensions" object.
+                mongo::BSONObj adagucObject = firstValue.getObjectField("adaguc");
+                if(adagucObject.hasField("dimensions")) {
+                    /* If the BSONObj is not null, the dimensions object is there. */
+                    VectorWithDimensionValues = adagucObject.getObjectField("dimensions").getField(cName.c_str()).Array();
+                } else {
+                    /* Else use the dimensions outside the "adaguc.dimensions" object (Always available). */
+                    VectorWithDimensionValues = adagucObject.getField(cName.c_str()).Array();
+                }
+
                 if(numberOfTimes != 1 && isAggregation ) {
                     fieldValue = VectorWithDimensionValues[indexOfDimension].str();
                 } else if ( isAggregation ) {
@@ -574,7 +600,16 @@ CDBStore::Store *ptrToStore(std::auto_ptr<mongo::DBClientCursor> cursor, const c
                 std::string fieldValue;
                 // If time or dimtime is being used:
                 if(strcmp(cName.c_str(),getCurrentDimension()) == 0 || strcmp(cName.c_str(),"time2D") == 0) {
-                    VectorWithDimensionValues = nextValue.getObjectField("adaguc").getField(cName.c_str()).Array();
+                    // First try to get the "adaguc.dimensions" object.
+                    mongo::BSONObj adagucObject = firstValue.getObjectField("adaguc");
+                    if(adagucObject.hasField("dimensions")) {
+                        /* If the BSONObj is not null, the dimensions object is there. */
+                        VectorWithDimensionValues = adagucObject.getObjectField("dimensions").getField(cName.c_str()).Array();
+                    } else {
+                        /* Else use the dimensions outside the "adaguc.dimensions" object (Always available). */
+                        VectorWithDimensionValues = adagucObject.getField(cName.c_str()).Array();
+                    }
+
                     if(numberOfTimes != 1 && isAggregation) {
                         fieldValue = VectorWithDimensionValues[indexOfDimension].str();
                     } else if ( isAggregation ) {
@@ -776,12 +811,12 @@ int CDBAdapterMongoDB::autoUpdateAndScanDimensionTables(CDataSource *dataSource)
             return 1;
         }
     
-        CT::string dimNameAdaguc = "adaguc.";
-        dimNameAdaguc.concat(dimName.c_str());
+        CT::string dimNameAdagucOld = getOldCorrectedColumnName(dimName.c_str());
+        CT::string dimNameAdaguc = getCorrectedColumnName(dimName.c_str());
         currentUsedDimension = dimName.c_str();
         
         mongo::BSONObjBuilder queryForSelecting;
-        queryForSelecting << "adaguc.path" << 1 << "adaguc.filedate" << 1 << dimNameAdaguc.c_str() << 1 << "_id" << 0;
+        queryForSelecting << "adaguc.path" << 1 << "adaguc.filedate" << 1 << dimNameAdagucOld.c_str() << 1 << dimNameAdaguc.c_str() << 1 << "_id" << 0;
         mongo::BSONObj objBSON = queryForSelecting.obj();
         
         mongo::BSONObjBuilder query_builder;
@@ -898,6 +933,7 @@ CDBStore::Store *CDBAdapterMongoDB::getMin(const char *name,const char *table) {
     }
 
     /* Get the correct MongoDB path of the current used dimension. */
+    CT::string usedNameOld = getOldCorrectedColumnName(name);
     CT::string usedName = getCorrectedColumnName(name);
   
     /* Selecting query. */
@@ -910,7 +946,7 @@ CDBStore::Store *CDBAdapterMongoDB::getMin(const char *name,const char *table) {
     mongo::BSONObj queryObject = queryBuilder.obj();
   
     /* Executing the query and sort by name, in ascending order. */
-    mongo::Query query = mongo::Query(queryObject).sort(usedName.c_str(),1);
+    mongo::Query query = mongo::Query(queryObject).sort(usedNameOld.c_str(),1);
     
     // -------------------------------
     
@@ -922,9 +958,9 @@ CDBStore::Store *CDBAdapterMongoDB::getMin(const char *name,const char *table) {
   
     mongo::BSONObjBuilder queryForSelecting;
     if (isAggregation) {
-        queryForSelecting << usedName.c_str() << BSON("$slice" << 1) << "_id" << 0;
+        queryForSelecting << usedNameOld.c_str() << BSON("$slice" << 1) << usedName.c_str() << BSON("$slice" << 1) << "_id" << 0;
     } else {
-        queryForSelecting << usedName.c_str() << 1 << "_id" << 0;
+        queryForSelecting << usedNameOld.c_str() << 1 << usedName.c_str() << 1 << "_id" << 0;
     }
     mongo::BSONObj objBSON = queryForSelecting.obj();
   
@@ -970,6 +1006,7 @@ CDBStore::Store *CDBAdapterMongoDB::getMax(const char *name,const char *table) {
     }
 
     /* Get the correct MongoDB path. */
+    CT::string usedNameOld = getOldCorrectedColumnName(name);
     CT::string usedName = getCorrectedColumnName(name);
 
     mongo::BSONObjBuilder queryBuilder;
@@ -992,9 +1029,9 @@ CDBStore::Store *CDBAdapterMongoDB::getMax(const char *name,const char *table) {
   
     mongo::BSONObjBuilder selectingBuilder;
     if (isAggregation) {
-        selectingBuilder << usedName.c_str() << BSON("$slice" << -1) << "_id" << 0;
+        selectingBuilder << usedNameOld.c_str() << BSON("$slice" << -1) << usedName.c_str() << BSON("$slice" << -1) << "_id" << 0;
     } else {
-        selectingBuilder << usedName.c_str() << 1 << "_id" << 0;
+        selectingBuilder << usedNameOld.c_str() << 1 << usedName.c_str() << 1 << "_id" << 0;
     }
     mongo::BSONObj selectingQuery = selectingBuilder.obj();
 
@@ -1042,11 +1079,12 @@ CDBStore::Store *CDBAdapterMongoDB::getUniqueValuesOrderedByValue(const char *na
     }
 
     /* The corrected name. PostgreSQL columns are different compared to MongoDB fields.  */
+    CT::string correctedNameOld = getOldCorrectedColumnName(name);
     CT::string correctedName = getCorrectedColumnName(name);
 
     /* What do we want to select? Only the name variable. */
     mongo::BSONObjBuilder queryBSON;
-    queryBSON << correctedName.c_str() << 1 << "_id" << 0;
+    queryBSON << correctedNameOld.c_str() << 1 << correctedName.c_str() << 1 << "_id" << 0;
     mongo::BSONObj queryObj = queryBSON.obj();
   
     /* The query itself. */
@@ -1059,7 +1097,7 @@ CDBStore::Store *CDBAdapterMongoDB::getUniqueValuesOrderedByValue(const char *na
     mongo::BSONObj queryAsObj = theQuery.obj();
   
     /* Making a query sorted by the selected value. */
-    mongo::Query query = mongo::Query(queryAsObj).sort(correctedName.c_str(), orderDescOrAsc ? 1 : -1);
+    mongo::Query query = mongo::Query(queryAsObj).sort(correctedNameOld.c_str(), orderDescOrAsc ? 1 : -1);
 
     std::auto_ptr<mongo::DBClientCursor> queryResultCursor;
     queryResultCursor = DB->query(dataGranulesTableMongoDB, query, limit, N_TO_SKIP_0, &queryObj);
@@ -1111,15 +1149,17 @@ CDBStore::Store *CDBAdapterMongoDB::getUniqueValuesOrderedByIndex(const char *na
     }
 
     /* The corrected name. Because of MongoDB, it can be that  */
+    CT::string correctedNameOld = getOldCorrectedColumnName(name);
     CT::string correctedName = getCorrectedColumnName(name);
   
     std::string dimensionName = "dim";
     dimensionName.append(name);
+    CT::string correctedDimNameOld = getOldCorrectedColumnName(dimensionName.c_str());
     CT::string correctedDimName = getCorrectedColumnName(dimensionName.c_str());
   
     /* What do we want to select? Only the name variable. */
     mongo::BSONObjBuilder queryBSON;
-    queryBSON << correctedName.c_str() << 1 << correctedDimName.c_str() << 1 << "_id" << 0;
+    queryBSON << correctedNameOld.c_str() << 1 << correctedName.c_str() << 1 << correctedDimNameOld.c_str() << 1 << correctedDimName.c_str() << 1 << "_id" << 0;
     mongo::BSONObj queryObj = queryBSON.obj();
   
     /* The query itself. */
@@ -1133,7 +1173,7 @@ CDBStore::Store *CDBAdapterMongoDB::getUniqueValuesOrderedByIndex(const char *na
   
     /* Sorting on multiple fields. So creating a BSON */
     mongo::BSONObjBuilder sortingFieldsBuilder;
-    sortingFieldsBuilder << correctedName.c_str() << 1 << correctedDimName.c_str() << 1;
+    sortingFieldsBuilder << correctedNameOld.c_str() << 1 << correctedName.c_str() << 1 << correctedDimNameOld.c_str() << 1 << correctedDimName.c_str() << 1;
     mongo::BSONObj sortingFields = sortingFieldsBuilder.obj();
   
     mongo::Query query = mongo::Query(theQuery).sort(sortingFields);
@@ -1208,16 +1248,18 @@ CDBStore::Store *CDBAdapterMongoDB::getFilesAndIndicesForDimensions(CDataSource 
     if (queryParamsString.find("/") != std::string::npos) {
         CT::string convertedToCtString(queryParamsString.c_str());
         CT::string* splittedString = convertedToCtString.splitToArray("/");
+        queryBuilder << getOldCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()).c_str() << mongo::GTE << splittedString[0].c_str() << mongo::LT << splittedString[1].c_str();
         queryBuilder << getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()).c_str() << mongo::GTE << splittedString[0].c_str() << mongo::LT << splittedString[1].c_str();
     } else {
         /* We don't have a time range. */
+        queryBuilder << getOldCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()).c_str() << queryParamsString.c_str();
         queryBuilder << getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()).c_str() << queryParamsString.c_str();
     }
   
     mongo::BSONObj theQuery = queryBuilder.obj();
   
     mongo::BSONObjBuilder selectingBuilder;
-    selectingBuilder << "adaguc.path" << 1 << getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()).c_str() << 1 << "_id" << 0;
+    selectingBuilder << "adaguc.path" << 1 << getOldCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()).c_str() << 1 << getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()).c_str() << 1 << "_id" << 0;
   
     mongo::BSONObj selectingQuery = selectingBuilder.obj();
     
@@ -1229,7 +1271,7 @@ CDBStore::Store *CDBAdapterMongoDB::getFilesAndIndicesForDimensions(CDataSource 
     
     // Only need 1 field in return, the time field.
     mongo::BSONObjBuilder indexBuilder;
-    indexBuilder << getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()).c_str() << 1 << "_id" << 0;
+    indexBuilder << getOldCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()).c_str() << 1 << getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()).c_str() << 1 << "_id" << 0;
     mongo::BSONObj indexFieldSelector = indexBuilder.obj();
     
     // Executing the query, limiting the query to 1.
@@ -1254,7 +1296,7 @@ CDBStore::Store *CDBAdapterMongoDB::getFilesAndIndicesForDimensions(CDataSource 
     }
     /* --------------------------------- */
   
-    std::auto_ptr<mongo::DBClientCursor> queryResultCursor = DB->query(dataGranulesTableMongoDB, mongo::Query(theQuery).sort(getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()).c_str(),-1), N_TO_RETURN_1, N_TO_SKIP_0, &selectingQuery);
+    std::auto_ptr<mongo::DBClientCursor> queryResultCursor = DB->query(dataGranulesTableMongoDB, mongo::Query(theQuery).sort(getOldCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()).c_str(),-1), N_TO_RETURN_1, N_TO_SKIP_0, &selectingQuery);
 
     std::string labels = "path,";
     labels.append(dataSource->requiredDims[0]->netCDFDimName.c_str());
@@ -1422,13 +1464,12 @@ CDBStore::Store *CDBAdapterMongoDB::getFilesForIndices(CDataSource *dataSource,s
     for(size_t i=0;i<dataSource->requiredDims.size();i++){
 
         // Add all the desired dimensions to the seleciton.
-        std::string requiredDimensionField = "adaguc.";
-        std::string requiredDimensionName = dataSource->requiredDims[i]->netCDFDimName.c_str();
-        requiredDimensionField.append(requiredDimensionName);
-        desiredFieldsBuilder << requiredDimensionField.c_str() << 1;
+        CT::string requiredDimensionFieldOld = getOldCorrectedColumnName(dataSource->requiredDims[i]->netCDFDimName.c_str());
+        CT::string requiredDimensionField = getCorrectedColumnName(dataSource->requiredDims[i]->netCDFDimName.c_str());
+        desiredFieldsBuilder << requiredDimensionFieldOld.c_str() << 1 << requiredDimensionField.c_str() << 1;
 
         // Add all the required dimensions to the sort order.
-        sortOrderBuilder << requiredDimensionField.c_str() << 1;
+        sortOrderBuilder << requiredDimensionFieldOld.c_str() << 1 << requiredDimensionField.c_str() << 1;
     }
 
     mongo::BSONObj desiredFieldsObjBSON = desiredFieldsBuilder.obj();
@@ -1758,9 +1799,8 @@ int CDBAdapterMongoDB::checkIfFileIsInTable(const char *tablename,const char *fi
   
     /* Granule needs to have the correct fileName and the correct path. */
     mongo::BSONObjBuilder query;
-    CT::string dimensionToCheck = "adaguc.";
-    dimensionToCheck.concat(currentUsedDimension);
-    query << "fileName" << tablename << "adaguc.path" << filename << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion << dimensionToCheck.c_str() << BSON("$exists" << "true");;
+    CT::string dimensionToCheckOld = getOldCorrectedColumnName(currentUsedDimension);
+    query << "fileName" << tablename << "adaguc.path" << filename << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion << dimensionToCheckOld.c_str() << BSON("$exists" << "true");
     mongo::BSONObj objBSON = query.obj();
   
     /* Converting the path from the granule to the datasetpath. */

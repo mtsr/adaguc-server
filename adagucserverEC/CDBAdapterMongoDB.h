@@ -55,6 +55,7 @@ class CDBAdapterMongoDB:public CDBAdapter{
      * 
      * @return  CT::string     the corrected column name.
      */
+     CT::string  getOldCorrectedColumnName(const char* column_name);
      CT::string  getCorrectedColumnName(const char* column_name);
 
     
