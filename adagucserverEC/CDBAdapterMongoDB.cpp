@@ -1243,17 +1243,44 @@ CDBStore::Store *CDBAdapterMongoDB::getFilesAndIndicesForDimensions(CDataSource 
     boost::replace_all(queryParamsString, "T", " ");
     boost::erase_all(queryParamsString, "Z");
 
+
+
+    /* TEMPORARY CHECK FOR checking if "adaguc.dimensions" is in the database. */
+    /* --------------------- */
+    bool hasDimensionsField = false;
+    mongo::BSONObjBuilder queryBuilderForCheckingAdagucDimensions;
+    if(!hasEnding(tableName.c_str(), "/")) {
+        queryBuilderForCheckingAdagucDimensions << "fileName" << tableName.c_str() << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion << "adaguc.dimensions" << BSON("$exists" << "true");
+    } else { 
+        queryBuilderForCheckingAdagucDimensions << "adaguc.dataSetPath" << tableName.c_str() << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion << "adaguc.dimensions" << BSON("$exists" << "true");
+    }
+    mongo::BSONObj objBsonCheckingAdagucDimensions = queryBuilderForCheckingAdagucDimensions.obj();
+
+    /* Executing the query, only return 1 result. */
+    std::auto_ptr<mongo::DBClientCursor> cursorFromMongoDB = DB->query(dataGranulesTableMongoDB, mongo::Query(objBsonCheckingAdagucDimensions), 1, 0);
+
+    if (cursorFromMongoDB->more()) {
+        hasDimensionsField = true;
+    }
+    /* --------------------- */
+
     /* If the time value has got a '/' character, it means a range.
      * Split it up and use $gte and $lt. */
     if (queryParamsString.find("/") != std::string::npos) {
         CT::string convertedToCtString(queryParamsString.c_str());
         CT::string* splittedString = convertedToCtString.splitToArray("/");
-        queryBuilder << getOldCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()).c_str() << mongo::GTE << splittedString[0].c_str() << mongo::LT << splittedString[1].c_str();
-        queryBuilder << getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()).c_str() << mongo::GTE << splittedString[0].c_str() << mongo::LT << splittedString[1].c_str();
+        if(hasDimensionsField) {
+            queryBuilder << getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()).c_str() << mongo::GTE << splittedString[0].c_str() << mongo::LT << splittedString[1].c_str();
+        } else {
+            queryBuilder << getOldCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()).c_str() << mongo::GTE << splittedString[0].c_str() << mongo::LT << splittedString[1].c_str();
+        }
     } else {
         /* We don't have a time range. */
-        queryBuilder << getOldCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()).c_str() << queryParamsString.c_str();
-        queryBuilder << getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()).c_str() << queryParamsString.c_str();
+        if(hasDimensionsField) {
+            queryBuilder << getCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()).c_str() << queryParamsString.c_str();
+        } else {
+            queryBuilder << getOldCorrectedColumnName(dataSource->requiredDims[0]->netCDFDimName.c_str()).c_str() << queryParamsString.c_str();
+        }
     }
   
     mongo::BSONObj theQuery = queryBuilder.obj();
