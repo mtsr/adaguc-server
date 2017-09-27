@@ -42,7 +42,7 @@
 /* ---------------------------------------- */
 const char *CDBAdapterMongoDB::className="CDBAdapterMongoDB";
 
-//#define CDBAdapterMongoDB_DEBUG
+#define CDBAdapterMongoDB_DEBUG
 
 /* Default values for mongo queries */
 #define N_TO_RETURN_0 0
@@ -601,7 +601,7 @@ CDBStore::Store *ptrToStore(std::auto_ptr<mongo::DBClientCursor> cursor, const c
                 // If time or dimtime is being used:
                 if(strcmp(cName.c_str(),getCurrentDimension()) == 0 || strcmp(cName.c_str(),"time2D") == 0) {
                     // First try to get the "adaguc.dimensions" object.
-                    mongo::BSONObj adagucObject = firstValue.getObjectField("adaguc");
+                    mongo::BSONObj adagucObject = nextValue.getObjectField("adaguc");
                     if(adagucObject.hasField("dimensions")) {
                         /* If the BSONObj is not null, the dimensions object is there. */
                         VectorWithDimensionValues = adagucObject.getObjectField("dimensions").getField(cName.c_str()).Array();
@@ -1496,7 +1496,7 @@ CDBStore::Store *CDBAdapterMongoDB::getFilesForIndices(CDataSource *dataSource,s
         desiredFieldsBuilder << requiredDimensionFieldOld.c_str() << 1 << requiredDimensionField.c_str() << 1;
 
         // Add all the required dimensions to the sort order.
-        sortOrderBuilder << requiredDimensionFieldOld.c_str() << 1 << requiredDimensionField.c_str() << 1;
+        sortOrderBuilder << requiredDimensionFieldOld.c_str() << 1;
     }
 
     mongo::BSONObj desiredFieldsObjBSON = desiredFieldsBuilder.obj();
@@ -1574,12 +1574,12 @@ CDBStore::Store *CDBAdapterMongoDB::getDimensionInfoForLayerTableAndLayerName(co
     /* If the result (dimension info about the layer) is not empty, continue. */
     if(ptrForDimension->more()) {
         mongo::BSONObj nextObject = ptrForDimension->next();
-        mongo::BSONObj dimensionObjectFromDb = nextObject.getObjectField("dimension");
+        mongo::BSONObj dimensionObjectFromDb = nextObject.getObjectField("adaguc").getObjectField("layer").getObjectField(layername);
         if(dimensionObjectFromDb.isEmpty()) {
             /* Else, return NULL so data can be added to the database.*/
             return NULL;
         } else {
-            dimensionName = nextObject.getStringField("dimension");
+            dimensionName = nextObject.getObjectField("adaguc").getObjectField("layer").getObjectField(layername).getStringField("dimension");
         }
     } else {
         dimensionName = ""; 
