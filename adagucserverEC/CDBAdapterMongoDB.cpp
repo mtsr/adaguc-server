@@ -42,7 +42,7 @@
 /* ---------------------------------------- */
 const char *CDBAdapterMongoDB::className="CDBAdapterMongoDB";
 
-#define CDBAdapterMongoDB_DEBUG
+//#define CDBAdapterMongoDB_DEBUG
 
 /* Default values for mongo queries */
 #define N_TO_RETURN_0 0
@@ -417,6 +417,57 @@ std::string numberToString(int pNumber)
 }
 
 /*
+ * Get the correct value for the store made in the ptrToStore function.
+ */
+std::string getCorrectFieldValue(std::string cName, mongo::BSONObj bsonObject, int numberOfTimes, bool isAggregation, int dimIndex, int indexOfDimension) {
+    std::vector<mongo::BSONElement> VectorWithDimensionValues;
+
+    /* Getting the name of a 'step in the dimension'. */
+    std::string dimOfDimension = "dim";
+    dimOfDimension.append(getCurrentDimension());
+    const char* dimDimension = dimOfDimension.c_str();
+
+    if(strcmp(cName.c_str(),getCurrentDimension()) == 0 || strcmp(cName.c_str(),"time2D") == 0) {
+        // First try to get the "adaguc.dimensions" object.
+        mongo::BSONObj adagucObject = bsonObject.getObjectField("adaguc");
+        if(adagucObject.hasField("dimensions")) {
+            /* If the BSONObj is not null, the dimensions object is there. */
+            VectorWithDimensionValues = adagucObject.getObjectField("dimensions").getField(cName.c_str()).Array();
+        } else {
+            /* Else use the dimensions outside the "adaguc.dimensions" object (Always available). */
+            VectorWithDimensionValues = adagucObject.getField(cName.c_str()).Array();
+        }
+
+        if(numberOfTimes != 1 && isAggregation ) {
+            return VectorWithDimensionValues[indexOfDimension].str();
+        } else if ( isAggregation ) {
+            return VectorWithDimensionValues[dimIndex].str();
+        } else {
+            return VectorWithDimensionValues[0].str();
+        }
+    } else if(strcmp(cName.c_str(),dimDimension) == 0) {
+        if(numberOfTimes != 1 && isAggregation) {
+            return numberToString(indexOfDimension);
+        } else if ( isAggregation ) {
+            return numberToString(dimIndex);
+        } else {
+            return "0";
+        }
+    } else if(strcmp(cName.c_str(), "ncname") == 0) {
+        return getCurrentDimension();
+    } else if(strcmp(cName.c_str(), "filedate") == 0) {
+        return bsonObject.getObjectField("adaguc").getStringField("filedate");
+    } else if(strcmp(cName.c_str(), "ogcname") == 0) {
+        const char* the_dimension = cfgLayer->Name[0]->value.c_str();
+        return bsonObject.getObjectField("adaguc").getObjectField("layer").getObjectField(the_dimension).getObjectField("dimension").getObjectField(getCurrentDimension()).getStringField("ogcname");
+    } else if(strcmp(cName.c_str(), "layer") == 0) {
+        return cfgLayer->Name[0]->value.c_str();
+    } else {
+        return bsonObject.getObjectField("adaguc").getStringField(cName.c_str());
+    }
+}
+
+/*
  *  Converting the query to a CDBStore, compatible with ADAGUC.
  * 
  *  @param    DBClientCursor    the cursor with a pointer to the query result.
@@ -495,11 +546,6 @@ CDBStore::Store *ptrToStore(std::auto_ptr<mongo::DBClientCursor> cursor, const c
     std::vector<mongo::BSONElement>::iterator it;
     /* Reset the colNumber. */
     colNumber = 0;
-
-    /* Getting the name of a 'step in the dimension'. */
-    std::string dimOfDimension = "dim";
-    dimOfDimension.append(getCurrentDimension());
-    const char* dimDimension = dimOfDimension.c_str();
     
     int numberOfTimes = 1;
     int indexOfDimension = 0;
@@ -514,54 +560,14 @@ CDBStore::Store *ptrToStore(std::auto_ptr<mongo::DBClientCursor> cursor, const c
 
     while(indexOfDimension < numberOfTimes) {
         usedColumns = table;
-        
         colNumber = 0;
-
         CDBStore::Record *record = new CDBStore::Record(colModel);
-        
         for(size_t j = 0; j < numCols; j++) {
             std::string cName = usedColumns.substr(0,usedColumns.find(delimiter));
             usedColumns.erase(0,usedColumns.find(delimiter) + 1);
-            std::string fieldValue;
-            // If time or dimtime is being used:
-            if(strcmp(cName.c_str(),getCurrentDimension()) == 0 || strcmp(cName.c_str(),"time2D") == 0) {
-                // First try to get the "adaguc.dimensions" object.
-                mongo::BSONObj adagucObject = firstValue.getObjectField("adaguc");
-                if(adagucObject.hasField("dimensions")) {
-                    /* If the BSONObj is not null, the dimensions object is there. */
-                    VectorWithDimensionValues = adagucObject.getObjectField("dimensions").getField(cName.c_str()).Array();
-                } else {
-                    /* Else use the dimensions outside the "adaguc.dimensions" object (Always available). */
-                    VectorWithDimensionValues = adagucObject.getField(cName.c_str()).Array();
-                }
 
-                if(numberOfTimes != 1 && isAggregation ) {
-                    fieldValue = VectorWithDimensionValues[indexOfDimension].str();
-                } else if ( isAggregation ) {
-                    fieldValue = VectorWithDimensionValues[dimIndex].str();
-                } else {
-                    fieldValue = VectorWithDimensionValues[0].str();
-                }
-            } else if(strcmp(cName.c_str(),dimDimension) == 0) {
-                if(numberOfTimes != 1 && isAggregation) {
-                    fieldValue = numberToString(indexOfDimension);
-                } else if ( isAggregation ) {
-                    fieldValue = numberToString(dimIndex);
-                } else {
-                    fieldValue = "0";
-                }
-            } else if(strcmp(cName.c_str(), "ncname") == 0) {
-                fieldValue = getCurrentDimension();
-            } else if(strcmp(cName.c_str(), "filedate") == 0) {
-                fieldValue = firstValue.getObjectField("adaguc").getStringField("filedate");
-            } else if(strcmp(cName.c_str(), "ogcname") == 0) {
-                const char* the_dimension = cfgLayer->Name[0]->value.c_str();
-                fieldValue = firstValue.getObjectField("adaguc").getObjectField("layer").getObjectField(the_dimension).getObjectField("dimension").getObjectField(getCurrentDimension()).getStringField("ogcname");
-            } else if(strcmp(cName.c_str(), "layer") == 0) {
-                fieldValue = cfgLayer->Name[0]->value.c_str();
-            } else {
-                fieldValue = firstValue.getObjectField("adaguc").getStringField(cName.c_str());
-            }
+            /* Find the correct value in the BSON Object. */
+            std::string fieldValue = getCorrectFieldValue(cName, firstValue, numberOfTimes, isAggregation, dimIndex, indexOfDimension);
             
             if(j == 0 && true == usingExtendedLayerID) {
                 fieldValue = fileNameOfGranule.append(fieldValue); 
@@ -597,46 +603,9 @@ CDBStore::Store *ptrToStore(std::auto_ptr<mongo::DBClientCursor> cursor, const c
             for(size_t j = 0; j < numCols; j++) {
                 std::string cName = usedColumns.substr(0,usedColumns.find(delimiter));
                 usedColumns.erase(0,usedColumns.find(delimiter) + 1);
-                std::string fieldValue;
-                // If time or dimtime is being used:
-                if(strcmp(cName.c_str(),getCurrentDimension()) == 0 || strcmp(cName.c_str(),"time2D") == 0) {
-                    // First try to get the "adaguc.dimensions" object.
-                    mongo::BSONObj adagucObject = nextValue.getObjectField("adaguc");
-                    if(adagucObject.hasField("dimensions")) {
-                        /* If the BSONObj is not null, the dimensions object is there. */
-                        VectorWithDimensionValues = adagucObject.getObjectField("dimensions").getField(cName.c_str()).Array();
-                    } else {
-                        /* Else use the dimensions outside the "adaguc.dimensions" object (Always available). */
-                        VectorWithDimensionValues = adagucObject.getField(cName.c_str()).Array();
-                    }
-
-                    if(numberOfTimes != 1 && isAggregation) {
-                        fieldValue = VectorWithDimensionValues[indexOfDimension].str();
-                    } else if ( isAggregation ) {
-                        fieldValue = VectorWithDimensionValues[dimIndex].str();
-                    } else {
-                        fieldValue = VectorWithDimensionValues[0].str();
-                    }
-                } else if(strcmp(cName.c_str(),dimDimension) == 0) {
-                    if(numberOfTimes != 1 && isAggregation) {
-                        fieldValue = numberToString(indexOfDimension);
-                    } else if ( isAggregation ) {
-                        fieldValue = numberToString(dimIndex);
-                    } else {
-                        fieldValue = "0";
-                    }
-                } else if(strcmp(cName.c_str(), "ncname") == 0) {
-                    fieldValue = getCurrentDimension();
-                } else if(strcmp(cName.c_str(), "filedate") == 0) {
-                    fieldValue = nextValue.getObjectField("adaguc").getStringField("filedate");
-                } else if(strcmp(cName.c_str(), "ogcname") == 0) {
-                    const char* the_dimension = cfgLayer->Name[0]->value.c_str();
-                    fieldValue = nextValue.getObjectField("adaguc").getObjectField("layer").getObjectField(the_dimension).getObjectField("dimension").getObjectField(getCurrentDimension()).getStringField("ogcname");
-                } else if(strcmp(cName.c_str(), "layer") == 0) {
-                    fieldValue = cfgLayer->Name[0]->value.c_str();
-                } else {
-                    fieldValue = nextValue.getObjectField("adaguc").getStringField(cName.c_str());
-                }
+                
+                /* Find the correct value in the BSON Object. */
+                std::string fieldValue = getCorrectFieldValue(cName, nextValue, numberOfTimes, isAggregation, dimIndex, indexOfDimension);
                 
                 if(j == 0 && true == usingExtendedLayerID) {
                     fieldValue = fileNameOfGranule.append(fieldValue); 
@@ -1248,16 +1217,18 @@ CDBStore::Store *CDBAdapterMongoDB::getFilesAndIndicesForDimensions(CDataSource 
     /* TEMPORARY CHECK FOR checking if "adaguc.dimensions" is in the database. */
     /* --------------------- */
     bool hasDimensionsField = false;
+    /* Building the query for checking if the adaguc.dimensions is available. */
     mongo::BSONObjBuilder queryBuilderForCheckingAdagucDimensions;
+    queryBuilderForCheckingAdagucDimensions << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion << "adaguc.dimensions" << BSON("$exists" << "true");
     if(!hasEnding(tableName.c_str(), "/")) {
-        queryBuilderForCheckingAdagucDimensions << "fileName" << tableName.c_str() << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion << "adaguc.dimensions" << BSON("$exists" << "true");
+        queryBuilderForCheckingAdagucDimensions << "fileName" << tableName.c_str();
     } else { 
-        queryBuilderForCheckingAdagucDimensions << "adaguc.dataSetPath" << tableName.c_str() << "dataSetName" << dataSetName << "dataSetVersion" << dataSetVersion << "adaguc.dimensions" << BSON("$exists" << "true");
+        queryBuilderForCheckingAdagucDimensions << "adaguc.dataSetPath" << tableName.c_str();
     }
     mongo::BSONObj objBsonCheckingAdagucDimensions = queryBuilderForCheckingAdagucDimensions.obj();
 
     /* Executing the query, only return 1 result. */
-    std::auto_ptr<mongo::DBClientCursor> cursorFromMongoDB = DB->query(dataGranulesTableMongoDB, mongo::Query(objBsonCheckingAdagucDimensions), 1, 0);
+    std::auto_ptr<mongo::DBClientCursor> cursorFromMongoDB = DB->query(dataGranulesTableMongoDB, mongo::Query(objBsonCheckingAdagucDimensions), N_TO_RETURN_1, N_TO_SKIP_0);
 
     if (cursorFromMongoDB->more()) {
         hasDimensionsField = true;
