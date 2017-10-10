@@ -418,17 +418,23 @@ std::string numberToString(int pNumber)
 
 /*
  * Get the correct value for the store made in the ptrToStore function.
+ * Based on what type of value the caller of ptrToStore wants, a value will be added
+ * to the store.
+ * This method is to get a correct field from a BSON Object from a MongoDB database
  */
 std::string getCorrectFieldValue(std::string cName, mongo::BSONObj bsonObject, int numberOfTimes, bool isAggregation, int dimIndex, int indexOfDimension) {
     std::vector<mongo::BSONElement> VectorWithDimensionValues;
 
-    /* Getting the name of a 'step in the dimension'. */
+    /* Simple pre-processing. The adapter could ask
+     * for a "dim<dimensionname>". This pre-processes the
+     * string. */
     std::string dimOfDimension = "dim";
     dimOfDimension.append(getCurrentDimension());
     const char* dimDimension = dimOfDimension.c_str();
 
+    /* Check every option possible. */
     if(strcmp(cName.c_str(),getCurrentDimension()) == 0 || strcmp(cName.c_str(),"time2D") == 0) {
-        // First try to get the "adaguc.dimensions" object.
+        /* First try to get the "adaguc.dimensions" object. */
         mongo::BSONObj adagucObject = bsonObject.getObjectField("adaguc");
         if(adagucObject.hasField("dimensions")) {
             /* If the BSONObj is not null, the dimensions object is there. */
@@ -1225,12 +1231,14 @@ CDBStore::Store *CDBAdapterMongoDB::getFilesAndIndicesForDimensions(CDataSource 
     } else { 
         queryBuilderForCheckingAdagucDimensions << "adaguc.dataSetPath" << tableName.c_str();
     }
+    /* Query object needs to be a BSONObj, not BSONObjBuilder, so converting. */
     mongo::BSONObj objBsonCheckingAdagucDimensions = queryBuilderForCheckingAdagucDimensions.obj();
 
     /* Executing the query, only return 1 result. */
     std::auto_ptr<mongo::DBClientCursor> cursorFromMongoDB = DB->query(dataGranulesTableMongoDB, mongo::Query(objBsonCheckingAdagucDimensions), N_TO_RETURN_1, N_TO_SKIP_0);
 
     if (cursorFromMongoDB->more()) {
+        /* If there are results, the "adaguc.dimensions" field is available. */
         hasDimensionsField = true;
     }
     /* --------------------- */
