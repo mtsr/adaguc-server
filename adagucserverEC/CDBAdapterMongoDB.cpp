@@ -2027,8 +2027,8 @@ int CDBAdapterMongoDB::addFilesToDataBase() {
             
                 /* Getting the neccesary information. */
                 CT::string dimensionValue = *(arrayOfElementsToWrite + 1);
-                dimensionValue.substringSelf(1,dimensionValue.length()-2);
-                
+                dimensionValue.substringSelf(1,dimensionValue.length()-1);
+                dimensionValue.replaceSelf("Z", "");
                 dimensionValue.replaceSelf("T", " ");
 
                 if(std::find(builder.begin(), builder.end(), dimensionValue.c_str()) != builder.end()) {
