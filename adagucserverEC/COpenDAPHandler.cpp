@@ -496,14 +496,14 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, C
         #ifdef ADAGUC_USE_KDCMONGODB
         /* Extracting the dataset name and version from the filepath. */
         CT::string opendapFilePath = path;
-        CT::string * dsNameAndVersion = opendapFilePath.splitToArray("/")[1].splitToArray("_");
+        CT::string * dsNameAndVersion = opendapFilePath.splitToArray("/")[1].splitToArray("::");
 
         /* Isolating the dataset name, and decode it. */
         CT::string dsName = dsNameAndVersion[0];
         dsName.decodeURLSelf();
 
         /* Isolating the dataset version, and decode it. */
-        CT::string dsVersion = dsNameAndVersion[1];
+        CT::string dsVersion = dsNameAndVersion[dsNameAndVersion->count - 1];
         dsVersion.decodeURLSelf();
 
         CDBAdapterMongoDB *mongoDB = (CDBAdapterMongoDB*) CDBFactory::getDBAdapter(srvParam->cfg);

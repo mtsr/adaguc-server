@@ -37,12 +37,12 @@ int CAutoResource::configureDataset(CServerParams *srvParam,bool plain){
     }
     
     CT::string internalDatasetLocation = srvParam->datasetLocation.c_str();
-    
-    internalDatasetLocation.replaceSelf(":","_");
-    internalDatasetLocation.replaceSelf("/","_");
-    
+
     CT::string datasetConfigFile;
     #ifndef ADAGUC_USE_KDCMONGODB
+      internalDatasetLocation.replaceSelf(":","_");
+      internalDatasetLocation.replaceSelf("/","_");
+
       datasetConfigFile = srvParam->cfg->Dataset[0]->attr.location.c_str();
     
       datasetConfigFile.printconcat("/%s.xml",internalDatasetLocation.c_str());
@@ -60,13 +60,25 @@ int CAutoResource::configureDataset(CServerParams *srvParam,bool plain){
       }
     #endif
     #ifdef ADAGUC_USE_KDCMONGODB
-      int lastIndexOfUnderscore = internalDatasetLocation.lastIndexOf("_");
-    
-      CT::string tmp_datasetname = internalDatasetLocation;
-      CT::string tmp_datasetversion = internalDatasetLocation;
-    
-      tmp_datasetname.substringSelf(0, lastIndexOfUnderscore);
-      tmp_datasetversion.substringSelf(lastIndexOfUnderscore + 1, internalDatasetLocation.length());
+
+      CT::string tmp_datasetname;
+      CT::string tmp_datasetversion;
+
+      // NOTE: Currently we split opendap urls by '::' and WMS and WCS urls by '_'.
+      // In the future also WMS and WCS should be split by '::', this will be fixed in KDCSP-373.
+      if (internalDatasetLocation.testRegEx(".::.")) {
+        CDBDebug("Using :: as separator.");
+        CT::string * dsNameAndVersion = internalDatasetLocation.splitToArray("::");
+        tmp_datasetname = dsNameAndVersion[0];
+        tmp_datasetversion = dsNameAndVersion[dsNameAndVersion->count - 1];
+      } else {
+        CDBDebug("Using _ as separator.");
+        int lastIndexOfUnderscore = internalDatasetLocation.lastIndexOf("_");
+        tmp_datasetname = internalDatasetLocation;
+        tmp_datasetversion = internalDatasetLocation;
+        tmp_datasetname.substringSelf(0, lastIndexOfUnderscore);
+        tmp_datasetversion.substringSelf(lastIndexOfUnderscore + 1, internalDatasetLocation.length());
+      }
 
       CDBAdapterMongoDB *mongoDB = (CDBAdapterMongoDB*) CDBFactory::getDBAdapter(srvParam->cfg);
       if (mongoDB == NULL) {
