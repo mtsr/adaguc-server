@@ -66,7 +66,7 @@ int CAutoResource::configureDataset(CServerParams *srvParam,bool plain){
 
       // NOTE: Currently we split opendap urls by '::' and WMS and WCS urls by '_'.
       // In the future also WMS and WCS should be split by '::', this will be fixed in KDCSP-373.
-      if (internalDatasetLocation.testRegEx(".::.")) {
+      if (internalDatasetLocation.testRegEx(".+::.+")) {
         CDBDebug("Using :: as separator.");
         CT::string * dsNameAndVersion = internalDatasetLocation.splitToArray("::");
         tmp_datasetname = dsNameAndVersion[0];
