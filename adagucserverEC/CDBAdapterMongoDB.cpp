@@ -777,6 +777,12 @@ int CDBAdapterMongoDB::autoUpdateAndScanDimensionTables(CDataSource *dataSource)
     CT::string dimName;
     for(size_t i=0;i<cfgLayer->Dimension.size();i++){
         dimName=cfgLayer->Dimension[i]->attr.name.c_str();
+
+                // TODO: Tijdelijke fix, bij ander dimensies gaat dit altijd fout.
+                if (strcmp(dimName.c_str(),"time") != 0 && strcmp(dimName.c_str(),"none") != 0) {
+                    CDBDebug("Currently we do not store other dimensions than time or none. The dimension %s will be skipped.", dimName.c_str());
+                    continue;
+                }
     
         CT::string tableName;
         try{
@@ -809,23 +815,31 @@ int CDBAdapterMongoDB::autoUpdateAndScanDimensionTables(CDataSource *dataSource)
 
         CT::string columnToReturn = "path,filedate,";
         columnToReturn.concat(dimName.c_str());
-        
-        CDBStore::Store *store = NULL;
-        if(queryResultCursor->itcount() > 0) {
-            store = ptrToStore(queryResultCursor, columnToReturn.c_str(), 0);
-        }
-        
-        if(store==NULL){
+
+        // Check if the dimension is available.
+        mongo::BSONObj firstValue;
+
+        if(queryResultCursor->more()) {
+            firstValue = queryResultCursor->next();
+            if(firstValue.isEmpty()
+                || !firstValue.hasField("adaguc")
+                || !firstValue.getObjectField("adaguc").hasField("dimensions")
+                || !firstValue.getObjectField("adaguc").getObjectField("dimensions").hasField(dimName.c_str())) {
+                CDBDebug("Dimension %s not found in database.", dimName.c_str());
+                tableNotFound=true;
+            }
+        } else {
+            CDBDebug("No results from database.");
             tableNotFound=true;
-            CDBDebug("No table found for dimension %s",dimNameAdaguc.c_str());
         }
         
         if(tableNotFound == false){
             if(srvParams->isAutoLocalFileResourceEnabled()==true){
                 try{
-                    CT::string databaseTime = store->getRecord(0)->get(1);if(databaseTime.length()<20){databaseTime.concat("Z");}databaseTime.setChar(10,'T');
+                    CT::string databaseTime = firstValue.getObjectField("adaguc").getStringField("filedate");
+                    if(databaseTime.length()<20){databaseTime.concat("Z");}databaseTime.setChar(10,'T');
             
-                    CT::string fileDate = CDirReader::getFileDate(store->getRecord(0)->get(0)->c_str());
+                    CT::string fileDate = CDirReader::getFileDate(firstValue.getObjectField("adaguc").getStringField("path"));
             
                 if(databaseTime.equals(fileDate)==false){
                     CDBDebug("Table was found, %s ~ %s : %d",fileDate.c_str(),databaseTime.c_str(),databaseTime.equals(fileDate));
@@ -838,8 +852,7 @@ int CDBAdapterMongoDB::autoUpdateAndScanDimensionTables(CDataSource *dataSource)
                 }
             }
         }
-        
-        delete store;
+
         if(tableNotFound||fileNeedsUpdate)break;
     }
   
