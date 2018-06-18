@@ -471,8 +471,13 @@ int COpenDAPHandler::HandleOpenDAPRequest(const char *path, const char *query, C
     }
 
     if(requestInfo.isDODRequest){
+        printf("%s%c%c", "XDAP: 2.0", 13, 10);
         printf("%s%c%c\n", "Content-Type: application/octet-stream", 13, 10);
     } else{
+        printf("%s%c%c", "XDAP: 2.0", 13, 10);
+        if (requestInfo.isDDSRequest) {
+            printf("%s%c%c", "Content-Description: dods-dds", 13, 10);
+        }
         printf("%s%c%c\n", "Content-Type: text/plain", 13, 10);
     }
 
