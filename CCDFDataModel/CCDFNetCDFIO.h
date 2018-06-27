@@ -42,7 +42,7 @@
 
 class CDFNetCDFReader :public CDFReader{
   private:
-  static void ncError(int line, const char *className, const char * msg,int e);  
+  static void ncError(int line, const char *className, const char * msg,int e);
     
   //CCDFWarper warper;
   static CDFType _typeConversionVar(nc_type type,bool isUnsigned);
@@ -86,7 +86,7 @@ class CDFNetCDFWriter{
     DEF_ERRORFUNCTION();
     int root_id,status;
     int netcdfMode;
-    int _write(void(*progress)(const char*message,float percentage));
+    int _write(void(*progress)(const char*message,float percentage), bool writeDimVarsFirst=true);
     int copyVar(CDF::Variable *variable,int nc_var_id,size_t *start, size_t *count);
 
   public:
@@ -100,8 +100,8 @@ class CDFNetCDFWriter{
     void disableReadData();
     void setDeflateShuffle(int deflate, int deflate_level,int shuffle);
     void recordNCCommands(bool enable);
-    int write(const char *fileName);
-    int write(const char *fileName,void(*progress)(const char*message,float percentage));
+    int write(const char *fileName, bool writeDimVarsFirst=true);
+    int write(const char *fileName,void(*progress)(const char*message,float percentage), bool writeDimVarsFirst=true);
 };
 
 #endif

@@ -46,14 +46,18 @@ class CDBAdapterMongoDB:public CDBAdapter{
     /* Setting the config file. */
     int setConfig(CServerConfig::XMLE_Configuration *cfg);
     
+    int              writeConfigXMLToDatabase(CT::string filePath, CT::string datasetPath);
+    CT::string       getAdagucConfig(CT::string datasetname, CT::string datasetversion);
     /*
      * Because mongoDB is completely different then RDBMS, we need to
      * correct the layername. So 'time' becomes 'adaguc.dimension.time.time' for example. 
-     * @param 	const char*		the column name that must be returned.
+     * @param   const char*     the column name that must be returned.
      * 
-     * @return	const char*		the corrected column name. 
+     * @return  CT::string     the corrected column name.
      */
-    const char* 	 getCorrectedColumnName(const char* column_name);
+     CT::string  getOldCorrectedColumnName(const char* column_name);
+     CT::string  getCorrectedColumnName(const char* column_name);
+
     
     /*
      * No desciption yet!
@@ -68,12 +72,12 @@ class CDBAdapterMongoDB:public CDBAdapter{
     /*
      *  Getting the granule name so ADAGUC knows where the information is stored. 
      *  In Postgres it was a tablename like t201509...., in MongoDB the filename is fine!
-     *  @param		const char*		The full path of the dataset.
-     *  @param		const char*		Not used parameter ( only applicable for SQL databases.
-     *  @param 		const char* 	Not used parameter ( only applicable for SQL databases.
-     *  @param		CDataSource		Not used parameter ( only applicable for SQL databases.
+     *  @param      const char*     The full path of the dataset.
+     *  @param      const char*     Not used parameter ( only applicable for SQL databases.
+     *  @param      const char*     Not used parameter ( only applicable for SQL databases.
+     *  @param      CDataSource     Not used parameter ( only applicable for SQL databases.
      * 
-     *  @return 	CT::string 		The filename of the granule.
+     *  @return     CT::string      The filename of the granule.
      */
     CT::string       getTableNameForPathFilterAndDimension(const char *path,const char *filter, const char * dimension,CDataSource *dataSource);
     
@@ -84,51 +88,51 @@ class CDBAdapterMongoDB:public CDBAdapter{
     
     /*
      *  Getting the minimum value of the selected name.
-     *  @param		const char*		The full path of the dataset.
-     *  @param		const char*		The filename of the granule.
+     *  @param      const char*     The full path of the dataset.
+     *  @param      const char*     The filename of the granule.
      * 
-     *  @return 	CDBStore::Store A store containing the minimum value.
+     *  @return     CDBStore::Store A store containing the minimum value.
      */
     CDBStore::Store *getMin(const char *name,const char *table);
     
     /*
      *  Getting the maximum value of the selected name.
-     *  @param		const char*		The full path of the dataset.
-     *  @param		const char*		The filename of the granule.
+     *  @param      const char*     The full path of the dataset.
+     *  @param      const char*     The filename of the granule.
      * 
-     *  @return 	CDBStore::Store A store containing the maximum value.
+     *  @return     CDBStore::Store A store containing the maximum value.
      */
     CDBStore::Store *getMax(const char *name,const char *table);
     
     /*  
      * Return specific values ordered by the same value.
-     * @param 		const char* 	The column that must be returned.
-     * @param 		int				If applicable, limit the return size.
-     * @param		bool			Return the values in ascending or descending order.
-     * @param		const char*		The filename of the granule.
+     * @param       const char*     The column that must be returned.
+     * @param       int             If applicable, limit the return size.
+     * @param       bool            Return the values in ascending or descending order.
+     * @param       const char*     The filename of the granule.
      * 
-     * @return		CDBStore::Store	A store containing the values.
+     * @return      CDBStore::Store A store containing the values.
      */
     CDBStore::Store *getUniqueValuesOrderedByValue(const char *name, int limit, bool orderDescOrAsc,const char *table);
     
     /*  
      * Return specific values ordered by two columns.
      * Most of the time, the tim and dimtime field are being used.
-     * @param 		const char* 	The column that must be returned.
-     * @param 		int				If applicable, limit the return number.
-     * @param		bool			Return the values in ascending or descending order.
-     * @param		const char*		The filename of the granule.
+     * @param       const char*     The column that must be returned.
+     * @param       int             If applicable, limit the return number.
+     * @param       bool            Return the values in ascending or descending order.
+     * @param       const char*     The filename of the granule.
      * 
-     * @return		CDBStore::Store	A store containing the values.
+     * @return      CDBStore::Store A store containing the values.
      */
     CDBStore::Store *getUniqueValuesOrderedByIndex(const char *name, int limit, bool orderDescOrAsc,const char *table);
     
     /*
      * Get the correct data, corresponding with the correct dimensions.
-     * @param 		CDataSource		Data containing column names.
-     * @param		int				If applicable, limit the return number.
+     * @param       CDataSource     Data containing column names.
+     * @param       int             If applicable, limit the return number.
      * 
-     * @return		CDBStore::Store	A store containing the values.
+     * @return      CDBStore::Store A store containing the values.
      */
     CDBStore::Store *getFilesAndIndicesForDimensions(CDataSource *dataSource,int limit);
     
@@ -140,23 +144,23 @@ class CDBAdapterMongoDB:public CDBAdapter{
     /*
      *  Getting the dimension info about the selected file. 
      * 
-     *  @param 		const char* 	Misleading param, but it is the fileName of the granule.
-     *  @param 		const char* 	The layer name used in ADAGUC.
+     *  @param      const char*     Misleading param, but it is the fileName of the granule.
+     *  @param      const char*     The layer name used in ADAGUC.
      * 
-     *  @return 	CDBStore::Store All records specific for some dimension.
+     *  @return     CDBStore::Store All records specific for some dimension.
      */
     CDBStore::Store *getDimensionInfoForLayerTableAndLayerName(const char *layertable,const char *layername);
     
     /*
      *  Setting the dimension info about the selected file. 
      * 
-     *  @param 		const char* 	Misleading param, but it is the fileName of the granule.
-     *  @param 		const char* 	The layer name used in ADAGUC.
-     *  @param		const char*		Column name.
-     *  @param		const char*		Column name.
-     *  @param		const char*		Column name.
+     *  @param      const char*     Misleading param, but it is the fileName of the granule.
+     *  @param      const char*     The layer name used in ADAGUC.
+     *  @param      const char*     Column name.
+     *  @param      const char*     Column name.
+     *  @param      const char*     Column name.
      * 
-     *  @return 	int 			Status for succeeded or not.
+     *  @return     int             Status for succeeded or not.
      */
     int              storeDimensionInfoForLayerTableAndLayerName(const char *layertable,const char *layername,const char *netcdfname,const char *ogcname,const char *units);
    
@@ -170,12 +174,20 @@ class CDBAdapterMongoDB:public CDBAdapter{
     int              createDimTableTimeStamp(const char *dimname,const char *tablename);
     
     /*
+     * Lookup for the full path of one granule of a certain dataset.
+     * It's a replacement for a full directory search OPeNDAP uses to get one header out of one file.
+     * @param   const char*     The name of the dataset
+     * @param   const char*     The version of the dataset
+     */
+    CT::string firstGranuleLookup(const char* datasetName, const char* datasetVersion);
+
+    /*
      *  Checking if the correct data is available in the database.datagranules database. 
      * 
-     *  @param 		const char* 	Filename of the granule.
-     *  @param 		const char* 	Full path of the datagranule.
+     *  @param      const char*     Filename of the granule.
+     *  @param      const char*     Full path of the datagranule.
      * 
-     *  @return 	int 			0 for available in the table, 1 for not available.
+     *  @return     int             0 for available in the table, 1 for not available.
      */
     int              checkIfFileIsInTable(const char *tablename,const char *filename);
     

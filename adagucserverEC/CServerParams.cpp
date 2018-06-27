@@ -281,7 +281,12 @@ bool CServerParams::isAutoResourceCacheEnabled(){
   if(autoResourceCacheEnabled==-1){
      autoResourceCacheEnabled = 0;
     if(cfg->AutoResource.size()>0){
-      if(cfg->AutoResource[0]->attr.enablecache.equals("true"))autoResourceCacheEnabled = 1;
+      if (cfg->AutoResource[0]->attr.enablecache.equals("header")) {
+        autoResourceCacheEnabled = 1;
+      }
+      if (cfg->AutoResource[0]->attr.enablecache.equals("all")) {
+        autoResourceCacheEnabled = 1;
+      }
     }
   }
   if(autoResourceCacheEnabled==1)return true;
@@ -543,10 +548,16 @@ bool CServerParams::checkTimeFormat(CT::string& timeToCheck){
 
 int CServerParams::parseConfigFile(CT::string &pszConfigFile){
   CT::string configFileData;
-  
+  CT::string subStringOfConfigString = pszConfigFile;
+  subStringOfConfigString.substringSelf(&subStringOfConfigString,0,1);
+
   configFileData = "";
   try{
-    configFileData = CReadFile::open(pszConfigFile.c_str());
+    if(strcmp(subStringOfConfigString.c_str(), "/") == 0) {
+      configFileData = CReadFile::open(pszConfigFile.c_str());
+    } else {
+      configFileData = pszConfigFile.c_str();
+    }
     const char *pszADAGUC_PATH=getenv("ADAGUC_PATH");
     if(pszADAGUC_PATH!=NULL)configFileData.replaceSelf("{ADAGUC_PATH}",pszADAGUC_PATH);
     const char *pszADAGUC_TMP=getenv("ADAGUC_TMP");

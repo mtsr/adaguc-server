@@ -49,6 +49,10 @@ private:
   int writeBinaryData(const char * filename,void **data,CDFType type, size_t varSize);
   int readBinaryData(const char * filename,void **data, CDFType type, size_t &varSize);
 public:
+  
+  enum CacheType {none, header, all};
+  CacheType howToUseCache;
+
   DEF_ERRORFUNCTION();
    
   CDFCache(){
@@ -57,8 +61,29 @@ public:
   CDFCache(CT::string cacheDir){
     //CDBDebug("DIRECTORY %s",cacheDir.c_str());
     this->cacheDir = cacheDir;
+    this->howToUseCache = none;
     cache = NULL;
   }
+
+  /*
+   * Set how the cache must be used.
+   * @return
+   * 0 for not succeeded
+   * 1 for succeeded
+   */
+  void setHowToUseCache(CDFCache::CacheType cacheUsage);
+
+  /*
+   * Get how the cache is being used.
+   */
+  CDFCache::CacheType getHowToUseCache();
+
+  /*
+   * Get the corresponding enum value from a string value.
+   * Only options are: "header" and "all". The rest will return "none".
+   */
+  static CDFCache::CacheType getCacheTypeFromString(CT::string cacheType);
+
   ~CDFCache(){
     delete cache;
   }

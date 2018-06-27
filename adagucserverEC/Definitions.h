@@ -151,7 +151,6 @@
 #define CXMLGEN_DEBUG
 #define MEASURETIME
 */
-
 //#define MEASURETIME
 //#define ADAGUC_TILESTITCHER_DEBUG
 //#define DEBUGON

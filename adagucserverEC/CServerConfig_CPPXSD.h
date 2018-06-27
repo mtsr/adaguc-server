@@ -738,6 +738,16 @@ class CServerConfig:public CXMLSerializerInterface{
           if(equals("value",5,attrname)){attr.value.copy(attrvalue);return;}
         }
     };
+    class XMLE_VFSPath: public CXMLObjectInterface{
+      public:
+        class Cattr{
+          public:
+            CXMLString value;
+        }attr;
+        void addAttribute(const char *attrname,const char *attrvalue){
+          if(equals("value",5,attrname)){attr.value.copy(attrvalue);return;}
+        }
+    };
     class XMLE_OnlineResource: public CXMLObjectInterface{
       public:
         class Cattr{
@@ -1205,6 +1215,7 @@ class CServerConfig:public CXMLSerializerInterface{
         std::vector <XMLE_OpenDAP*> OpenDAP;
         std::vector <XMLE_Path*> Path;
         std::vector <XMLE_TempDir*> TempDir;
+        std::vector <XMLE_VFSPath*> VFSPath;
         std::vector <XMLE_OnlineResource*> OnlineResource;
         std::vector <XMLE_DataBase*> DataBase;
         std::vector <XMLE_Projection*> Projection;
@@ -1222,6 +1233,7 @@ class CServerConfig:public CXMLSerializerInterface{
           XMLE_DELOBJ(OpenDAP);
           XMLE_DELOBJ(Path);
           XMLE_DELOBJ(TempDir);
+          XMLE_DELOBJ(VFSPath);
           XMLE_DELOBJ(OnlineResource);
           XMLE_DELOBJ(DataBase);
           XMLE_DELOBJ(Projection);
@@ -1244,6 +1256,7 @@ class CServerConfig:public CXMLSerializerInterface{
             else if(equals("Path",4,name)){XMLE_ADDOBJ(Path);}
             else if(equals("OpenDAP",7,name)){XMLE_ADDOBJ(OpenDAP);}
             else if(equals("TempDir",7,name)){XMLE_ADDOBJ(TempDir);}
+            else if(equals("VFSPath",7,name)){XMLE_ADDOBJ(VFSPath);}
             else if(equals("OnlineResource",14,name)){XMLE_ADDOBJ(OnlineResource);}
             else if(equals("DataBase",8,name)){XMLE_ADDOBJ(DataBase);}
             else if(equals("Projection",10,name)){XMLE_ADDOBJ(Projection);}

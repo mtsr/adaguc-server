@@ -2,6 +2,7 @@
 #include "CTypes.h"
 #include "CServerError.h"
 #include "CDFObjectStore.h"
+#include "CDBFactory.h"
 
 const char *CAutoResource::className = "CAutoResource";
 
@@ -30,33 +31,66 @@ int CAutoResource::configureDataset(CServerParams *srvParam,bool plain){
       return 1;
     }
     
-    if(CServerParams::checkForValidTokens(srvParam->datasetLocation.c_str(),"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_-:/.")==false){
+    if(CServerParams::checkForValidTokens(srvParam->datasetLocation.c_str(),"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_-:/. ")==false){
       CDBError("Invalid dataset name. ");
       return 1;
     }
     
     CT::string internalDatasetLocation = srvParam->datasetLocation.c_str();
+
+    CT::string datasetConfigFile;
+    #ifndef ADAGUC_USE_KDCMONGODB
+      internalDatasetLocation.replaceSelf(":","_");
+      internalDatasetLocation.replaceSelf("/","_");
+
+      datasetConfigFile = srvParam->cfg->Dataset[0]->attr.location.c_str();
     
-    internalDatasetLocation.replaceSelf(":","_");
-    internalDatasetLocation.replaceSelf("/","_");
+      datasetConfigFile.printconcat("/%s.xml",internalDatasetLocation.c_str());
     
-    CT::string datasetConfigFile = srvParam->cfg->Dataset[0]->attr.location.c_str();
-    
-    datasetConfigFile.printconcat("/%s.xml",internalDatasetLocation.c_str());
-    
+      //Check whether this config file exists.
+      struct stat stFileInfo;
+      int intStat;
+      intStat = stat(datasetConfigFile.c_str(),&stFileInfo);
+      CT::string cacheBuffer;
+      //The file exists, so remove it.
+      if(intStat != 0) {
+        CDBDebug("Dataset config file does not exist: %s ",datasetConfigFile.c_str());
+        CDBError("No such dataset");
+        return 1;
+      }
+    #endif
+    #ifdef ADAGUC_USE_KDCMONGODB
+
+      CT::string tmp_datasetname;
+      CT::string tmp_datasetversion;
+
+      // NOTE: Currently we split opendap urls by '::' and WMS and WCS urls by '_'.
+      // In the future also WMS and WCS should be split by '::', this will be fixed in KDCSP-373.
+      if (internalDatasetLocation.testRegEx(".+::.+")) {
+        CDBDebug("Using :: as separator.");
+        CT::string * dsNameAndVersion = internalDatasetLocation.splitToArray("::");
+        tmp_datasetname = dsNameAndVersion[0];
+        tmp_datasetversion = dsNameAndVersion[dsNameAndVersion->count - 1];
+      } else {
+        CDBDebug("Using _ as separator.");
+        int lastIndexOfUnderscore = internalDatasetLocation.lastIndexOf("_");
+        tmp_datasetname = internalDatasetLocation;
+        tmp_datasetversion = internalDatasetLocation;
+        tmp_datasetname.substringSelf(0, lastIndexOfUnderscore);
+        tmp_datasetversion.substringSelf(lastIndexOfUnderscore + 1, internalDatasetLocation.length());
+      }
+
+      CDBAdapterMongoDB *mongoDB = (CDBAdapterMongoDB*) CDBFactory::getDBAdapter(srvParam->cfg);
+      if (mongoDB == NULL) {
+        CDBError("Failed to initialize CDBAdapterMongoDB");
+        return 1;
+      }
+      datasetConfigFile = mongoDB->getAdagucConfig(tmp_datasetname.c_str(), tmp_datasetversion.c_str());
+
+      CDBFactory::clear();
+    #endif
+
     CDBDebug("Found dataset %s",datasetConfigFile.c_str());
-    
-    //Check whether this config file exists.
-    struct stat stFileInfo;
-    int intStat;
-    intStat = stat(datasetConfigFile.c_str(),&stFileInfo);
-    CT::string cacheBuffer;
-    //The file exists, so remove it.
-    if(intStat != 0) {
-      CDBDebug("Dataset config file does not exist: %s ",datasetConfigFile.c_str());
-      CDBError("No such dataset");
-      return 1;
-    }
 
     //Add the dataset file to the current configuration      
     int status = srvParam->parseConfigFile(datasetConfigFile);
